@@ -1,0 +1,63 @@
+# =============================================================================
+# CLIPPY CONFIGURATION
+# =============================================================================
+# Configuration for Clippy lints that require additional settings beyond
+# what can be specified in Cargo.toml workspace lints.
+
+# =============================================================================
+# DISALLOWED TYPES
+# =============================================================================
+# Enforce use of faster FxHash types instead of std HashMap/HashSet.
+# FxHash is significantly faster for string keys (common in AST work).
+
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use FxHashMap from rustc-hash for better performance" },
+    { path = "std::collections::HashSet", reason = "use FxHashSet from rustc-hash for better performance" },
+    { path = "std::collections::hash_map::RandomState", reason = "use BuildHasherDefault<FxHasher>" },
+    { path = "std::sync::Mutex", reason = "use parking_lot::Mutex for better performance" },
+    { path = "std::sync::RwLock", reason = "use parking_lot::RwLock for better performance" },
+    { path = "std::sync::Condvar", reason = "use parking_lot::Condvar for better performance" },
+]
+
+# =============================================================================
+# DISALLOWED METHODS
+# =============================================================================
+# Prevent usage of methods that can lead to issues in this codebase.
+
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use toolchain::command for working directory enforcement" },
+    { path = "std::env::set_current_dir", reason = "avoid global state mutation; pass paths explicitly" },
+    { path = "std::thread::spawn", reason = "use rayon for CPU-bound work or tokio::spawn for async work" },
+    { path = "std::process::exit", reason = "return errors instead; let main handle exit codes" },
+]
+
+# =============================================================================
+# LINT THRESHOLDS
+# =============================================================================
+# Thresholds for various complexity and size lints.
+
+# Maximum cognitive complexity of a function (default: 25)
+cognitive-complexity-threshold = 25
+
+# Maximum number of arguments a function can have (default: 7)
+too-many-arguments-threshold = 7
+
+# Maximum type complexity score (default: 250)
+type-complexity-threshold = 250
+
+# Maximum number of lines in a function for too_many_lines lint (default: 100)
+too-many-lines-threshold = 100
+
+# Maximum number of struct fields (default: 8)
+# struct-field-count-threshold = 12
+
+# Maximum number of enum variants (default: 35)
+# enum-variant-count-threshold = 40
+
+# =============================================================================
+# DOC CONFIGURATION
+# =============================================================================
+# Settings for documentation lints.
+
+# Check private items for documentation
+check-private-items = false

@@ -1,0 +1,189 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "crates/ch-core",
+    "crates/ch-ts-parser",
+    "crates/ch-scanner",
+    "crates/ch-watcher",
+    "crates/ch-tui",
+    "crates/ch-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Sharad Patel"]
+license = "MIT"
+repository = "https://github.com/Sharad-Patel1/ch-migration"
+rust-version = "1.85"
+
+# =============================================================================
+# PROFILES
+# =============================================================================
+
+[profile.release]
+debug = 0
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# Optimize dependencies even in dev mode for faster runtime
+[profile.dev.package."*"]
+opt-level = 3
+
+# =============================================================================
+# WORKSPACE LINTS
+# =============================================================================
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+# -----------------------------------------------------------------------------
+# Category Lints
+# -----------------------------------------------------------------------------
+complexity = { level = "deny", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# -----------------------------------------------------------------------------
+# Cherry-picked Restriction Lints (NOT blanket forbid - per Clippy docs)
+# -----------------------------------------------------------------------------
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+# string_to_string removed - use implicit_clone instead
+implicit_clone = "deny"
+clone_on_ref_ptr = "deny"
+exit = "deny"
+get_unwrap = "deny"
+infinite_loop = "deny"
+mem_forget = "deny"
+try_err = "deny"
+
+# -----------------------------------------------------------------------------
+# Allow Specific Pedantic Lints (too noisy for this project)
+# -----------------------------------------------------------------------------
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+if_not_else = "allow"
+
+# =============================================================================
+# WORKSPACE DEPENDENCIES
+# =============================================================================
+
+[workspace.dependencies]
+# -----------------------------------------------------------------------------
+# Internal Crates
+# -----------------------------------------------------------------------------
+ch-core = { path = "crates/ch-core" }
+ch-ts-parser = { path = "crates/ch-ts-parser" }
+ch-scanner = { path = "crates/ch-scanner" }
+ch-watcher = { path = "crates/ch-watcher" }
+ch-tui = { path = "crates/ch-tui" }
+
+# -----------------------------------------------------------------------------
+# Error Handling
+# -----------------------------------------------------------------------------
+anyhow = "1.0"
+thiserror = "2.0"
+color-eyre = "0.6"
+
+# -----------------------------------------------------------------------------
+# Serialization
+# -----------------------------------------------------------------------------
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# -----------------------------------------------------------------------------
+# Async Runtime
+# -----------------------------------------------------------------------------
+tokio = { version = "1.43", features = ["full", "tracing"] }
+
+# -----------------------------------------------------------------------------
+# Parsing (Tree-sitter)
+# -----------------------------------------------------------------------------
+tree-sitter = "0.24"
+tree-sitter-typescript = "0.23"
+
+# -----------------------------------------------------------------------------
+# Arena Allocation
+# -----------------------------------------------------------------------------
+bumpalo = { version = "3.16", features = ["collections", "boxed"] }
+bumpalo-herd = "0.1"
+
+# -----------------------------------------------------------------------------
+# TUI
+# -----------------------------------------------------------------------------
+ratatui = "0.29"
+crossterm = "0.28"
+
+# -----------------------------------------------------------------------------
+# File Watching
+# -----------------------------------------------------------------------------
+notify = "7.0"
+notify-debouncer-mini = "0.5"
+
+# -----------------------------------------------------------------------------
+# Parallelism & Concurrency
+# -----------------------------------------------------------------------------
+rayon = "1.10"
+parking_lot = "0.12"
+dashmap = "6.1"
+smallvec = { version = "1.13", features = ["union"] }
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+
+# -----------------------------------------------------------------------------
+# Hashing (FxHash - faster than std HashMap for string keys)
+# -----------------------------------------------------------------------------
+rustc-hash = "2.1"
+
+# -----------------------------------------------------------------------------
+# Logging & Tracing
+# -----------------------------------------------------------------------------
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# -----------------------------------------------------------------------------
+# Path Handling
+# -----------------------------------------------------------------------------
+camino = "1.1"
+
+# -----------------------------------------------------------------------------
+# File Walking
+# -----------------------------------------------------------------------------
+ignore = "0.4"
+
+# -----------------------------------------------------------------------------
+# Text Handling for TUI
+# -----------------------------------------------------------------------------
+unicode-width = "0.2"
+
+# -----------------------------------------------------------------------------
+# Testing
+# -----------------------------------------------------------------------------
+insta = { version = "1.42", features = ["json"] }

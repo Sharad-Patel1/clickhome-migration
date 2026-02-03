@@ -1,0 +1,39 @@
+[package]
+name = "ch-watcher"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "File watcher with debouncing and async event streaming"
+
+[dependencies]
+# Internal crates
+ch-core.workspace = true
+
+# File watching
+notify.workspace = true
+notify-debouncer-mini.workspace = true
+
+# Async runtime (for channels and spawn_blocking)
+tokio.workspace = true
+
+# Synchronization
+parking_lot.workspace = true
+
+# Path handling
+camino.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Tracing
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true

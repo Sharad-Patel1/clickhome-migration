@@ -1,0 +1,40 @@
+[package]
+name = "ch-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "CLI entry point for the ch-migration tool"
+
+[[bin]]
+name = "ch-migrate"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+ch-core.workspace = true
+ch-tui.workspace = true
+ch-scanner.workspace = true
+ch-watcher.workspace = true
+
+# CLI argument parsing
+clap.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Error handling
+anyhow.workspace = true
+color-eyre.workspace = true
+
+# Path handling
+camino.workspace = true
+
+# Tracing & logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

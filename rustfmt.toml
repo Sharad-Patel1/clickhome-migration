@@ -1,0 +1,83 @@
+# =============================================================================
+# RUSTFMT CONFIGURATION
+# =============================================================================
+# Formatting configuration for Rust 2024 edition.
+# Run with: cargo fmt
+
+# =============================================================================
+# GENERAL
+# =============================================================================
+
+edition = "2024"
+newline_style = "Unix"
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+# Group imports by std, external crates, then local crates
+group_imports = "StdExternalCrate"
+
+# Merge imports from the same module into a single use statement
+imports_granularity = "Module"
+
+# Sort imports alphabetically
+reorder_imports = true
+
+# =============================================================================
+# MODULES
+# =============================================================================
+
+# Reorder mod declarations alphabetically
+reorder_modules = true
+
+# =============================================================================
+# FORMATTING HEURISTICS
+# =============================================================================
+
+# Use maximum width heuristics for all constructs
+use_small_heuristics = "Max"
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+
+# Format code blocks in documentation comments
+format_code_in_doc_comments = true
+
+# Width for code blocks in documentation
+doc_comment_code_block_width = 100
+
+# Normalize documentation comments to use ///
+normalize_doc_attributes = true
+
+# =============================================================================
+# WHITESPACE
+# =============================================================================
+
+# Remove trailing whitespace
+trailing_semicolon = true
+
+# =============================================================================
+# COMMENTS
+# =============================================================================
+
+# Wrap comments to fit within max_width
+wrap_comments = true
+comment_width = 100
+
+# Normalize // comments to have a single space after //
+normalize_comments = true
+
+# =============================================================================
+# FUNCTIONS & STRUCTS
+# =============================================================================
+
+# Put function parameters on separate lines if they don't fit
+fn_params_layout = "Tall"
+
+# Format string literals that are too long
+format_strings = true

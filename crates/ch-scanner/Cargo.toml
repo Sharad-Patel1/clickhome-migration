@@ -1,0 +1,43 @@
+[package]
+name = "ch-scanner"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Filesystem scanner for TypeScript files with parallel analysis"
+
+[dependencies]
+# Internal crates
+ch-core.workspace = true
+ch-ts-parser.workspace = true
+
+# File walking (respects .gitignore)
+ignore.workspace = true
+
+# Parallel processing
+rayon.workspace = true
+
+# Concurrent caching
+dashmap.workspace = true
+parking_lot.workspace = true
+
+# Path handling
+camino.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Fast hashing
+rustc-hash.workspace = true
+
+# Tracing
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,44 @@
+[package]
+name = "ch-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Terminal user interface components using Ratatui"
+
+[dependencies]
+# Internal crates
+ch-core.workspace = true
+ch-scanner.workspace = true
+ch-watcher.workspace = true
+
+# TUI framework
+ratatui.workspace = true
+crossterm.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Synchronization
+parking_lot.workspace = true
+
+# Text handling
+unicode-width.workspace = true
+
+# Error handling
+anyhow.workspace = true
+color-eyre.workspace = true
+
+# Fast hashing
+rustc-hash.workspace = true
+
+# Tracing
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true

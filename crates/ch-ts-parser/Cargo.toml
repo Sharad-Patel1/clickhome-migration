@@ -1,0 +1,36 @@
+[package]
+name = "ch-ts-parser"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "TypeScript parser using tree-sitter for import and model detection"
+
+[dependencies]
+# Internal crates
+ch-core.workspace = true
+
+# Tree-sitter parsing
+tree-sitter.workspace = true
+tree-sitter-typescript.workspace = true
+
+# Arena allocation for efficient AST storage
+bumpalo.workspace = true
+bumpalo-herd.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Fast hashing
+rustc-hash.workspace = true
+
+# Compact vectors
+smallvec.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true

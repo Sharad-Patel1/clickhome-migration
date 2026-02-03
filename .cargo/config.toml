@@ -1,0 +1,77 @@
+# =============================================================================
+# CARGO CONFIGURATION
+# =============================================================================
+# Project-specific Cargo configuration.
+
+# =============================================================================
+# BUILD SETTINGS
+# =============================================================================
+
+[build]
+# Number of parallel jobs for compilation
+jobs = 8
+
+# =============================================================================
+# TARGET-SPECIFIC SETTINGS
+# =============================================================================
+
+# macOS Intel
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "target-cpu=native"]
+
+# macOS Apple Silicon
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "target-cpu=native"]
+
+# Linux x86_64
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]
+
+# =============================================================================
+# ALIASES
+# =============================================================================
+# Convenient shortcuts for common commands.
+
+[alias]
+# Basic commands
+r = "run"
+t = "test"
+c = "check"
+b = "build"
+br = "build --release"
+
+# Linting
+cl = "clippy"
+cla = "clippy --all-targets --all-features"
+clf = "clippy --fix --allow-dirty --allow-staged"
+
+# Documentation
+d = "doc"
+do = "doc --open"
+
+# Testing
+ta = "test --all-targets"
+tw = "test --workspace"
+
+# Run the CLI binary specifically
+cli = "run --package ch-cli --"
+
+# xtask commands
+xt = "run --package xtask --"
+
+# =============================================================================
+# REGISTRIES
+# =============================================================================
+
+[registries.crates-io]
+protocol = "sparse"
+
+# =============================================================================
+# NET SETTINGS
+# =============================================================================
+
+[net]
+# Retry network operations
+retry = 3
+# Git fetch with CLI for better SSH support
+git-fetch-with-cli = true
