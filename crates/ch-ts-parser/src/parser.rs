@@ -1,14 +1,40 @@
 //! TypeScript parser management using tree-sitter.
 //!
-//! This module provides the [`TsParser`] struct for parsing TypeScript files
-//! and extracting import information.
+//! This module provides two parser types:
+//!
+//! - [`TsParser`]: High-level parser with internal arena management, returning owned data
+//! - [`ArenaParser`]: Low-level parser for use with external [`bumpalo::Bump`] arenas
+//!
+//! # Choosing a Parser
+//!
+//! Use [`TsParser`] for simple single-file parsing or when you don't need to manage
+//! arena lifetimes manually.
+//!
+//! Use [`ArenaParser`] for high-performance parallel scanning with [`bumpalo_herd::Herd`]:
+//!
+//! ```ignore
+//! use bumpalo_herd::Herd;
+//! use ch_ts_parser::ArenaParser;
+//! use rayon::prelude::*;
+//!
+//! let herd = Herd::new();
+//! let results: Vec<_> = files
+//!     .par_iter()
+//!     .map_init(
+//!         || (ArenaParser::new().unwrap(), herd.get()),
+//!         |(parser, arena), source| parser.parse_with_arena(arena, source),
+//!     )
+//!     .collect();
+//! ```
 
+use bumpalo::Bump;
 use ch_core::ImportInfo;
 use smallvec::SmallVec;
 use tree_sitter::{InputEdit, Language, Parser, Query, Tree};
 
+use crate::arena::BumpImportInfo;
 use crate::error::ParseError;
-use crate::import::extract_imports;
+use crate::import::{extract_imports, extract_imports_arena};
 use crate::queries::{get_tsx_import_query, get_typescript_import_query};
 
 /// Indicates whether the parser is configured for TypeScript or TSX.
@@ -18,7 +44,7 @@ enum ParserKind {
     Tsx,
 }
 
-/// Result of parsing a TypeScript file.
+/// Result of parsing a TypeScript file with owned string data.
 ///
 /// Contains the extracted imports and the syntax tree, which can be used
 /// for incremental re-parsing when the file changes.
@@ -48,10 +74,75 @@ pub struct ParseResult {
     pub tree: Tree,
 }
 
+/// Result of parsing a TypeScript file with arena-allocated string data.
+///
+/// This is the arena-backed equivalent of [`ParseResult`]. String data is
+/// borrowed from a [`Bump`] arena and must not outlive it.
+///
+/// # Lifetime
+///
+/// The `'bump` lifetime is tied to the arena holding the string data.
+/// Convert to owned [`ParseResult`] using [`into_owned`](Self::into_owned)
+/// if the data needs to outlive the arena.
+///
+/// # Examples
+///
+/// ```ignore
+/// use bumpalo::Bump;
+///
+/// let arena = Bump::new();
+/// let result = parser.parse_with_arena(&arena, source)?;
+///
+/// // Process while arena is alive
+/// for import in &result.imports {
+///     println!("{}", import.path);
+/// }
+///
+/// // Convert if needed
+/// let owned = result.into_owned();
+/// ```
+#[derive(Debug)]
+pub struct BumpParseResult<'bump> {
+    /// All import statements detected in the file.
+    ///
+    /// String data is borrowed from the arena.
+    pub imports: SmallVec<[BumpImportInfo<'bump>; 8]>,
+
+    /// The syntax tree from parsing.
+    pub tree: Tree,
+}
+
+impl BumpParseResult<'_> {
+    /// Converts this arena-backed result into an owned [`ParseResult`].
+    ///
+    /// This allocates new strings for all import paths and names.
+    #[must_use]
+    pub fn into_owned(self) -> ParseResult {
+        ParseResult {
+            imports: self
+                .imports
+                .into_iter()
+                .map(BumpImportInfo::into_owned)
+                .collect(),
+            tree: self.tree,
+        }
+    }
+}
+
+impl From<BumpParseResult<'_>> for ParseResult {
+    fn from(bump: BumpParseResult<'_>) -> Self {
+        bump.into_owned()
+    }
+}
+
 /// TypeScript parser for extracting imports from source files.
 ///
 /// Wraps a tree-sitter parser configured for TypeScript. The parser can be
 /// reused for multiple files to avoid repeated initialization.
+///
+/// This parser manages an internal arena for string allocation and returns
+/// owned [`ImportInfo`] data. For high-performance parallel scanning with
+/// external arenas, use [`ArenaParser`] instead.
 ///
 /// # Thread Safety
 ///
@@ -59,6 +150,7 @@ pub struct ParseResult {
 /// either:
 /// - Create one parser per thread using `thread_local!`
 /// - Create a new parser for each parallel task
+/// - Use [`ArenaParser`] with [`bumpalo_herd::Herd`]
 ///
 /// The underlying tree-sitter [`Query`] is thread-safe and shared across
 /// all parser instances.
@@ -294,11 +386,254 @@ impl std::fmt::Debug for TsParser {
     }
 }
 
+/// Arena-based TypeScript parser for high-performance parallel scanning.
+///
+/// Unlike [`TsParser`], this parser requires an external [`Bump`] arena for
+/// string allocation. This enables efficient parallel scanning using
+/// [`bumpalo_herd::Herd`] for per-thread arenas.
+///
+/// # Performance Benefits
+///
+/// - Zero heap allocations during import extraction (only arena grows)
+/// - String interning for path deduplication within each parse
+/// - Works with `bumpalo-herd` for lock-free parallel allocation
+///
+/// # Thread Safety
+///
+/// `ArenaParser` is `Send` but not `Sync`. For parallel scanning:
+///
+/// ```ignore
+/// use bumpalo_herd::Herd;
+/// use ch_ts_parser::ArenaParser;
+/// use rayon::prelude::*;
+///
+/// let herd = Herd::new();
+/// let results: Vec<_> = files
+///     .par_iter()
+///     .map_init(
+///         || (ArenaParser::new().unwrap(), herd.get()),
+///         |(parser, arena), source| {
+///             let result = parser.parse_with_arena(arena.as_bump(), source);
+///             // Convert to owned before arena scope ends
+///             result.map(|r| r.into_owned())
+///         },
+///     )
+///     .collect();
+/// ```
+///
+/// # Examples
+///
+/// ```
+/// use bumpalo::Bump;
+/// use ch_ts_parser::ArenaParser;
+///
+/// let mut parser = ArenaParser::new()?;
+/// let arena = Bump::new();
+/// let source = r#"import { Foo } from '../shared/models/foo';"#;
+///
+/// let result = parser.parse_with_arena(&arena, source)?;
+///
+/// for import in &result.imports {
+///     if import.is_legacy_import() {
+///         println!("Legacy import: {}", import.path);
+///     }
+/// }
+///
+/// // Convert to owned when arena lifetime ends
+/// let owned_result = result.into_owned();
+/// # Ok::<(), ch_ts_parser::ParseError>(())
+/// ```
+pub struct ArenaParser {
+    /// The underlying tree-sitter parser.
+    parser: Parser,
+    /// Whether this is a TypeScript or TSX parser.
+    kind: ParserKind,
+}
+
+impl ArenaParser {
+    /// Creates a new arena-based TypeScript parser.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError::LanguageInit`] if the TypeScript language
+    /// cannot be set on the parser.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ch_ts_parser::ArenaParser;
+    ///
+    /// let parser = ArenaParser::new()?;
+    /// # Ok::<(), ch_ts_parser::ParseError>(())
+    /// ```
+    pub fn new() -> Result<Self, ParseError> {
+        let mut parser = Parser::new();
+        let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+
+        parser
+            .set_language(&language)
+            .map_err(|_| ParseError::LanguageInit)?;
+
+        Ok(Self {
+            parser,
+            kind: ParserKind::TypeScript,
+        })
+    }
+
+    /// Creates a new arena-based TSX parser.
+    ///
+    /// Use this for `.tsx` files.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError::LanguageInit`] if the TSX language
+    /// cannot be set on the parser.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ch_ts_parser::ArenaParser;
+    ///
+    /// let parser = ArenaParser::new_tsx()?;
+    /// # Ok::<(), ch_ts_parser::ParseError>(())
+    /// ```
+    pub fn new_tsx() -> Result<Self, ParseError> {
+        let mut parser = Parser::new();
+        let language: Language = tree_sitter_typescript::LANGUAGE_TSX.into();
+
+        parser
+            .set_language(&language)
+            .map_err(|_| ParseError::LanguageInit)?;
+
+        Ok(Self {
+            parser,
+            kind: ParserKind::Tsx,
+        })
+    }
+
+    /// Returns the appropriate import query for this parser's language.
+    fn get_query(&self) -> Result<&'static Query, ParseError> {
+        match self.kind {
+            ParserKind::TypeScript => get_typescript_import_query(),
+            ParserKind::Tsx => get_tsx_import_query(),
+        }
+    }
+
+    /// Parses TypeScript source code using the provided arena for allocation.
+    ///
+    /// All string data in the returned [`BumpParseResult`] is allocated in the
+    /// arena and must not outlive it. Use [`BumpParseResult::into_owned`] to
+    /// convert to owned data if needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `arena` - The bump arena for string allocation
+    /// * `source` - The TypeScript source code to parse
+    ///
+    /// # Returns
+    ///
+    /// A [`BumpParseResult`] with string data borrowed from the arena.
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`ParseError::Parse`] if parsing fails
+    /// - Returns [`ParseError::QueryCompile`] if the import query fails to compile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bumpalo::Bump;
+    /// use ch_ts_parser::ArenaParser;
+    ///
+    /// let mut parser = ArenaParser::new()?;
+    /// let arena = Bump::new();
+    /// let source = r#"
+    ///     import { Foo } from '../shared/models/foo';
+    ///     import { Bar } from '../shared_2023/models/bar';
+    /// "#;
+    ///
+    /// let result = parser.parse_with_arena(&arena, source)?;
+    /// assert_eq!(result.imports.len(), 2);
+    /// # Ok::<(), ch_ts_parser::ParseError>(())
+    /// ```
+    pub fn parse_with_arena<'bump>(
+        &mut self,
+        arena: &'bump Bump,
+        source: &str,
+    ) -> Result<BumpParseResult<'bump>, ParseError> {
+        let tree = self
+            .parser
+            .parse(source, None)
+            .ok_or(ParseError::Parse)?;
+
+        let query = self.get_query()?;
+        let imports = extract_imports_arena(arena, &tree, source, query);
+
+        Ok(BumpParseResult { imports, tree })
+    }
+
+    /// Incrementally re-parses TypeScript source using the provided arena.
+    ///
+    /// This is more efficient than [`parse_with_arena`](Self::parse_with_arena)
+    /// when making small changes to a file, as tree-sitter can reuse unchanged
+    /// portions of the syntax tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `arena` - The bump arena for string allocation
+    /// * `source` - The new source code after the edit
+    /// * `old_tree` - The syntax tree from the previous parse
+    /// * `edit` - Information about what changed
+    ///
+    /// # Returns
+    ///
+    /// A new [`BumpParseResult`] with updated imports and syntax tree.
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`ParseError::Parse`] if parsing fails
+    /// - Returns [`ParseError::QueryCompile`] if the import query fails to compile
+    pub fn parse_incremental_with_arena<'bump>(
+        &mut self,
+        arena: &'bump Bump,
+        source: &str,
+        old_tree: &Tree,
+        edit: &InputEdit,
+    ) -> Result<BumpParseResult<'bump>, ParseError> {
+        // Clone and edit the old tree
+        let mut edited_tree = old_tree.clone();
+        edited_tree.edit(edit);
+
+        // Parse with the edited tree as a hint
+        let tree = self
+            .parser
+            .parse(source, Some(&edited_tree))
+            .ok_or(ParseError::Parse)?;
+
+        let query = self.get_query()?;
+        let imports = extract_imports_arena(arena, &tree, source, query);
+
+        Ok(BumpParseResult { imports, tree })
+    }
+}
+
+impl std::fmt::Debug for ArenaParser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArenaParser")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ch_core::{ImportKind, ModelSource};
     use tree_sitter::Point;
+
+    // =========================================================================
+    // Tests for TsParser (owned API)
+    // =========================================================================
 
     #[test]
     fn test_parser_new() {
@@ -449,5 +784,130 @@ const App = () => <div>Hello</div>;
         let debug = format!("{parser:?}");
         assert!(debug.contains("TsParser"));
         assert!(debug.contains("TypeScript"));
+    }
+
+    // =========================================================================
+    // Tests for ArenaParser
+    // =========================================================================
+
+    #[test]
+    fn test_arena_parser_new() {
+        let parser = ArenaParser::new();
+        assert!(parser.is_ok());
+    }
+
+    #[test]
+    fn test_arena_parser_new_tsx() {
+        let parser = ArenaParser::new_tsx();
+        assert!(parser.is_ok());
+    }
+
+    #[test]
+    fn test_arena_parser_parse() {
+        let mut parser = ArenaParser::new().expect("Parser creation failed");
+        let arena = Bump::new();
+        let source = r#"import { Foo } from '../shared/models/foo';"#;
+
+        let result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
+        assert_eq!(result.imports.len(), 1);
+        assert!(result.imports[0].is_legacy_import());
+    }
+
+    #[test]
+    fn test_arena_parser_converts_to_owned() {
+        let mut parser = ArenaParser::new().expect("Parser creation failed");
+        let arena = Bump::new();
+        let source = r#"import { Foo, Bar } from '../shared/models/foo';"#;
+
+        let result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
+
+        // Convert to owned ParseResult
+        let owned: ParseResult = result.into();
+
+        assert_eq!(owned.imports.len(), 1);
+        assert_eq!(owned.imports[0].path, "'../shared/models/foo'");
+        assert_eq!(owned.imports[0].names.len(), 2);
+    }
+
+    #[test]
+    fn test_arena_parser_incremental() {
+        let mut parser = ArenaParser::new().expect("Parser creation failed");
+        let arena1 = Bump::new();
+
+        // Initial parse
+        let source1 = "import { Foo } from './foo';";
+        let result1 = parser
+            .parse_with_arena(&arena1, source1)
+            .expect("Parse failed");
+        assert_eq!(result1.imports.len(), 1);
+
+        // Edit: add Bar to the import
+        let arena2 = Bump::new();
+        let source2 = "import { Foo, Bar } from './foo';";
+        let edit = InputEdit {
+            start_byte: 13,
+            old_end_byte: 13,
+            new_end_byte: 18,
+            start_position: Point::new(0, 13),
+            old_end_position: Point::new(0, 13),
+            new_end_position: Point::new(0, 18),
+        };
+
+        let result2 = parser
+            .parse_incremental_with_arena(&arena2, source2, &result1.tree, &edit)
+            .expect("Incremental parse failed");
+
+        assert_eq!(result2.imports.len(), 1);
+        assert_eq!(result2.imports[0].names.len(), 2);
+    }
+
+    #[test]
+    fn test_arena_parser_tsx() {
+        let mut parser = ArenaParser::new_tsx().expect("Parser creation failed");
+        let arena = Bump::new();
+        let source = r#"
+import React from 'react';
+import { Foo } from '../shared/models/foo';
+
+const App = () => <div>Hello</div>;
+"#;
+
+        let result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
+        assert_eq!(result.imports.len(), 2);
+    }
+
+    #[test]
+    fn test_arena_parser_debug() {
+        let parser = ArenaParser::new().expect("Parser creation failed");
+        let debug = format!("{parser:?}");
+        assert!(debug.contains("ArenaParser"));
+        assert!(debug.contains("TypeScript"));
+    }
+
+    #[test]
+    fn test_bump_parse_result_into_owned() {
+        let mut parser = ArenaParser::new().expect("Parser creation failed");
+        let arena = Bump::new();
+        let source = r#"
+import { Foo } from '../shared/models/foo';
+import { Bar } from '../shared_2023/models/bar';
+"#;
+
+        let bump_result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
+        assert_eq!(bump_result.imports.len(), 2);
+
+        // Convert explicitly
+        let owned = bump_result.into_owned();
+        assert_eq!(owned.imports.len(), 2);
+        assert_eq!(owned.imports[0].path, "'../shared/models/foo'");
+        assert_eq!(owned.imports[1].path, "'../shared_2023/models/bar'");
     }
 }
