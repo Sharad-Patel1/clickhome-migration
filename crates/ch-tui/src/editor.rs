@@ -124,10 +124,25 @@ fn resolve_editor(config: &Config) -> Result<EditorCommand, TuiError> {
 
 fn resolve_absolute_path(path: &Utf8Path, root: &Utf8Path) -> Utf8PathBuf {
     if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        root.join(path)
+        return path.to_path_buf();
     }
+
+    if root.is_absolute() {
+        return root.join(path);
+    }
+
+    let cwd = env::current_dir()
+        .ok()
+        .and_then(|dir| Utf8Path::from_path(&dir).map(Utf8Path::to_path_buf));
+
+    if let Some(cwd) = cwd {
+        if path.starts_with(root) {
+            return cwd.join(path);
+        }
+        return cwd.join(root).join(path);
+    }
+
+    root.join(path)
 }
 
 /// Runs the external editor, suspending the TUI while it is active.
