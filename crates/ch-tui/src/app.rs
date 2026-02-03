@@ -553,6 +553,7 @@ impl App {
             KeyCode::Tab => Action::ToggleFocus,
             KeyCode::Char('/') => Action::EnterFilterMode,
             KeyCode::Char('f') => Action::CycleStatusFilter,
+            KeyCode::Char('o') => Action::OpenInEditor,
             KeyCode::Char('r') => Action::Rescan,
             KeyCode::Char('d') => Action::EnterDirectorySetup,
             KeyCode::Esc => {
@@ -745,7 +746,8 @@ impl App {
                 self.status = None;
             }
 
-            Action::OpenInEditor | Action::CopyPath => {
+            Action::OpenInEditor => {}
+            Action::CopyPath => {
                 // Not implemented yet
             }
 

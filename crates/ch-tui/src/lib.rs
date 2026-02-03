@@ -49,9 +49,11 @@
 pub mod action;
 pub mod app;
 pub mod components;
+mod editor;
 pub mod error;
 pub mod event;
 pub mod theme;
+mod toolchain;
 pub mod tui;
 pub mod ui;
 
@@ -218,7 +220,21 @@ async fn run_event_loop(
             };
 
             // Apply action
-            app.update(action);
+            match action {
+                Action::OpenInEditor => {
+                    let selected_path = app.selected_file().map(|file| file.path.clone());
+                    if let Some(path) = selected_path {
+                        if let Err(e) =
+                            editor::run_editor(&path, &app.config.scan.root_path, &app.config, tui)
+                        {
+                            app.status = Some(StatusMessage::error(format!("Editor failed: {e}")));
+                        }
+                    } else {
+                        app.status = Some(StatusMessage::info("No file selected"));
+                    }
+                }
+                _ => app.update(action),
+            }
 
             if let Some(root) = app.take_watcher_restart() {
                 if let Some(existing) = watcher.take() {

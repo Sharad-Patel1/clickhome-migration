@@ -66,6 +66,10 @@ struct Cli {
     /// Disable colored output.
     #[arg(long, global = true)]
     no_color: bool,
+
+    /// Editor to use for opening files (overrides $EDITOR).
+    #[arg(long, global = true, env = "CH_MIGRATE_EDITOR")]
+    editor: Option<String>,
 }
 
 /// Available subcommands.
@@ -181,6 +185,7 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
     if let Some(name) = config.scan.shared_2023_path.file_name() {
         config.scan.shared_2023_dir = name.to_owned();
     }
+    config.editor.editor.clone_from(&cli.editor);
 
     validate_dir(&config.scan.shared_path, "shared", require_shared_paths)?;
     validate_dir(
