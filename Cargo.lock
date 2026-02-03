@@ -244,6 +244,7 @@ dependencies = [
  "insta",
  "rustc-hash",
  "smallvec",
+ "streaming-iterator",
  "thiserror",
  "tree-sitter",
  "tree-sitter-typescript",
