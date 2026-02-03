@@ -150,7 +150,7 @@ notify-debouncer-mini = "0.5"
 rayon = "1.10"
 parking_lot = "0.12"
 dashmap = "6.1"
-smallvec = { version = "1.13", features = ["union"] }
+smallvec = { version = "1.13", features = ["union", "serde"] }
 
 # -----------------------------------------------------------------------------
 # CLI
@@ -171,7 +171,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # -----------------------------------------------------------------------------
 # Path Handling
 # -----------------------------------------------------------------------------
-camino = "1.1"
+camino = { version = "1.1", features = ["serde1"] }
 
 # -----------------------------------------------------------------------------
 # File Walking
