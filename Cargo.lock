@@ -216,6 +216,8 @@ dependencies = [
  "ch-watcher",
  "clap",
  "color-eyre",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
