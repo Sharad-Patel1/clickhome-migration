@@ -26,6 +26,7 @@ use std::io::Write;
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
 use ch_scanner::{ScanConfig as ScannerConfig, Scanner, StatsSnapshot};
+use ch_ts_parser::ModelPathMatcher;
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing::info;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -49,6 +50,14 @@ struct Cli {
     /// Path to WebApp.Desktop/src directory.
     #[arg(short, long, global = true, env = "CH_MIGRATE_PATH")]
     path: Option<Utf8PathBuf>,
+
+    /// Absolute path to legacy shared directory.
+    #[arg(long, global = true, env = "CH_MIGRATE_SHARED_PATH")]
+    shared_path: Option<Utf8PathBuf>,
+
+    /// Absolute path to `shared_2023` directory.
+    #[arg(long, global = true, env = "CH_MIGRATE_SHARED_2023_PATH")]
+    shared_2023_path: Option<Utf8PathBuf>,
 
     /// Enable verbose logging (debug level).
     #[arg(short, long, global = true)]
@@ -133,7 +142,7 @@ fn init_tracing(verbose: bool, no_color: bool) {
 /// # Errors
 ///
 /// Returns an error if the path is not provided, doesn't exist, or isn't a directory.
-fn build_config(cli: &Cli) -> color_eyre::Result<Config> {
+fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Config> {
     let path = cli
         .path
         .clone()
@@ -157,8 +166,58 @@ fn build_config(cli: &Cli) -> color_eyre::Result<Config> {
 
     let mut config = Config::default();
     config.scan.root_path = path;
+    config.scan.shared_path = cli
+        .shared_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join(&config.scan.shared_dir));
+    config.scan.shared_2023_path = cli
+        .shared_2023_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join(&config.scan.shared_2023_dir));
+
+    if let Some(name) = config.scan.shared_path.file_name() {
+        config.scan.shared_dir = name.to_owned();
+    }
+    if let Some(name) = config.scan.shared_2023_path.file_name() {
+        config.scan.shared_2023_dir = name.to_owned();
+    }
+
+    validate_dir(&config.scan.shared_path, "shared", require_shared_paths)?;
+    validate_dir(
+        &config.scan.shared_2023_path,
+        "shared_2023",
+        require_shared_paths,
+    )?;
 
     Ok(config)
+}
+
+fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::Result<()> {
+    if path.as_str().is_empty() {
+        if required {
+            return Err(color_eyre::eyre::eyre!(
+                "{label} path is required but missing."
+            ));
+        }
+        return Ok(());
+    }
+
+    if !path.exists() {
+        if required {
+            return Err(color_eyre::eyre::eyre!(
+                "{label} path does not exist: {path}"
+            ));
+        }
+        return Ok(());
+    }
+
+    if !path.is_dir() {
+        return Err(color_eyre::eyre::eyre!(
+            "{label} path is not a directory: {path}"
+        ));
+    }
+
+    Ok(())
 }
 
 /// Creates a [`Scanner`] from the configuration.
@@ -169,8 +228,10 @@ fn build_config(cli: &Cli) -> color_eyre::Result<Config> {
 fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
     let scanner_config = ScannerConfig::new(&config.scan.root_path)
         .with_skip_dirs(&["node_modules", "dist", ".git"]);
+    let matcher = ModelPathMatcher::from_scan_config(&config.scan);
 
-    Scanner::new(scanner_config).map_err(|e| color_eyre::eyre::eyre!("Failed to create scanner: {}", e))
+    Scanner::new_with_matcher(scanner_config, matcher)
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to create scanner: {}", e))
 }
 
 // =============================================================================
@@ -411,13 +472,19 @@ async fn main() -> color_eyre::Result<()> {
     // 3. Initialize tracing (handles --no-color for log output)
     init_tracing(cli.verbose, cli.no_color);
 
-    // 5. Build config from CLI args
-    let config = build_config(&cli)?;
-
-    // 6. Route to appropriate command
-    match cli.command {
-        Commands::Scan { detailed } => run_scan(&config, detailed),
-        Commands::Watch { no_watch } => run_watch(config, no_watch).await,
-        Commands::Report { format, output } => run_report(&config, format, output),
+    // 5. Route to appropriate command
+    match &cli.command {
+        Commands::Scan { detailed } => {
+            let config = build_config(&cli, true)?;
+            run_scan(&config, *detailed)
+        }
+        Commands::Watch { no_watch } => {
+            let config = build_config(&cli, false)?;
+            run_watch(config, *no_watch).await
+        }
+        Commands::Report { format, output } => {
+            let config = build_config(&cli, true)?;
+            run_report(&config, *format, output.clone())
+        }
     }
 }

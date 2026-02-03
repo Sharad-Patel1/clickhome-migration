@@ -172,7 +172,7 @@ pub mod source;
 // Re-export main types for convenient access
 pub use error::ParseError;
 pub use parser::{ArenaParser, BumpParseResult, ParseResult, TsParser};
-pub use source::detect_model_source;
+pub use source::{detect_model_source, detect_model_source_with, ModelPathMatcher};
 
 // Re-export arena types for ch-scanner integration
 pub use arena::{ArenaStr, BumpImportBuilder, BumpImportInfo, StringInterner};

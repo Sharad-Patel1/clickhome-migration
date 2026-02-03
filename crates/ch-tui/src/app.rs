@@ -22,7 +22,8 @@ use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
-use ch_scanner::{ScanResult, Scanner, StatsSnapshot};
+use ch_scanner::{ScanConfig as ScannerConfig, ScanResult, Scanner, StatsSnapshot};
+use ch_ts_parser::ModelPathMatcher;
 use ch_watcher::FileEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::Rect;
@@ -43,6 +44,9 @@ pub enum AppMode {
 
     /// Help panel is displayed.
     Help,
+
+    /// Directory setup overlay is displayed.
+    DirectorySetup,
 }
 
 /// Which panel has focus.
@@ -261,6 +265,92 @@ pub struct FilterState {
     pub status: Option<MigrationStatus>,
 }
 
+/// Field focus for directory setup input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectoryField {
+    /// Root path (WebApp.Desktop/src).
+    Root,
+    /// Legacy shared directory path.
+    Shared,
+    /// New `shared_2023` directory path.
+    Shared2023,
+}
+
+impl DirectoryField {
+    /// Returns the next field in focus order.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Root => Self::Shared,
+            Self::Shared => Self::Shared2023,
+            Self::Shared2023 => Self::Root,
+        }
+    }
+
+    /// Returns the previous field in focus order.
+    #[must_use]
+    pub const fn previous(self) -> Self {
+        match self {
+            Self::Root => Self::Shared2023,
+            Self::Shared => Self::Root,
+            Self::Shared2023 => Self::Shared,
+        }
+    }
+}
+
+/// Directory setup input state.
+#[derive(Debug, Clone)]
+pub struct DirectorySetup {
+    /// Input value for root path.
+    pub root_input: String,
+    /// Input value for shared path.
+    pub shared_input: String,
+    /// Input value for `shared_2023` path.
+    pub shared_2023_input: String,
+    /// Which field is active.
+    pub active_field: DirectoryField,
+}
+
+impl DirectorySetup {
+    /// Creates directory input state from the current configuration.
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            root_input: config.scan.root_path.to_string(),
+            shared_input: config.scan.shared_path.to_string(),
+            shared_2023_input: config.scan.shared_2023_path.to_string(),
+            active_field: DirectoryField::Root,
+        }
+    }
+
+    /// Refreshes input values from the current configuration.
+    pub fn refresh_from_config(&mut self, config: &Config) {
+        self.root_input = config.scan.root_path.to_string();
+        self.shared_input = config.scan.shared_path.to_string();
+        self.shared_2023_input = config.scan.shared_2023_path.to_string();
+        self.active_field = DirectoryField::Root;
+    }
+
+    /// Moves focus to the next input field.
+    pub fn focus_next(&mut self) {
+        self.active_field = self.active_field.next();
+    }
+
+    /// Moves focus to the previous input field.
+    pub fn focus_previous(&mut self) {
+        self.active_field = self.active_field.previous();
+    }
+
+    /// Returns a mutable reference to the active input field.
+    pub fn active_input_mut(&mut self) -> &mut String {
+        match self.active_field {
+            DirectoryField::Root => &mut self.root_input,
+            DirectoryField::Shared => &mut self.shared_input,
+            DirectoryField::Shared2023 => &mut self.shared_2023_input,
+        }
+    }
+}
+
 impl FilterState {
     /// Returns `true` if any filter is active.
     #[must_use]
@@ -358,6 +448,12 @@ pub struct App {
     /// Status message to display.
     pub status: Option<StatusMessage>,
 
+    /// Directory setup input state.
+    pub directory_setup: DirectorySetup,
+
+    /// Pending watcher restart path (if needed).
+    pending_watcher_restart: Option<Utf8PathBuf>,
+
     /// Whether the application should quit.
     pub should_quit: bool,
 
@@ -372,16 +468,32 @@ impl App {
     /// Creates a new application with the given configuration and scanner.
     #[must_use]
     pub fn new(config: Config, scanner: Scanner) -> Self {
+        let needs_setup = Self::requires_directory_setup(&config);
+        let directory_setup = DirectorySetup::from_config(&config);
+        let mode = if needs_setup {
+            AppMode::DirectorySetup
+        } else {
+            AppMode::Normal
+        };
+        let status = if needs_setup {
+            Some(StatusMessage::info(
+                "Select directories and press Enter to apply",
+            ))
+        } else {
+            None
+        };
         Self {
             config,
             scanner,
             files: Vec::new(),
-            mode: AppMode::Normal,
+            mode,
             focus: Focus::FileList,
             file_list_state: FileListState::new(),
             detail_state: DetailPaneState::default(),
             filter: FilterState::default(),
-            status: None,
+            status,
+            directory_setup,
+            pending_watcher_restart: None,
             should_quit: false,
             stats: StatsSnapshot::default(),
             terminal_size: Rect::default(),
@@ -423,6 +535,7 @@ impl App {
             AppMode::Normal => self.handle_normal_key(key),
             AppMode::Filtering => self.handle_filter_key(key),
             AppMode::Help => self.handle_help_key(key),
+            AppMode::DirectorySetup => self.handle_directory_setup_key(key),
         }
     }
 
@@ -441,6 +554,7 @@ impl App {
             KeyCode::Char('/') => Action::EnterFilterMode,
             KeyCode::Char('f') => Action::CycleStatusFilter,
             KeyCode::Char('r') => Action::Rescan,
+            KeyCode::Char('d') => Action::EnterDirectorySetup,
             KeyCode::Esc => {
                 if self.filter.is_active() {
                     Action::ClearFilter
@@ -477,6 +591,31 @@ impl App {
     fn handle_help_key(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | '?') => Action::HideHelp,
+            _ => Action::None,
+        }
+    }
+
+    /// Handles a key event in directory setup mode.
+    fn handle_directory_setup_key(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc => Action::ExitDirectorySetup,
+            KeyCode::Enter => Action::ApplyDirectorySetup,
+            KeyCode::Tab => {
+                self.directory_setup.focus_next();
+                Action::None
+            }
+            KeyCode::BackTab => {
+                self.directory_setup.focus_previous();
+                Action::None
+            }
+            KeyCode::Backspace => {
+                self.directory_setup.active_input_mut().pop();
+                Action::None
+            }
+            KeyCode::Char(c) => {
+                self.directory_setup.active_input_mut().push(c);
+                Action::None
+            }
             _ => Action::None,
         }
     }
@@ -575,6 +714,30 @@ impl App {
                 self.mode = AppMode::Normal;
             }
 
+            Action::EnterDirectorySetup => {
+                self.directory_setup.refresh_from_config(&self.config);
+                self.mode = AppMode::DirectorySetup;
+            }
+            Action::ExitDirectorySetup => {
+                if Self::requires_directory_setup(&self.config) {
+                    self.status = Some(StatusMessage::error(
+                        "Directory setup required to continue",
+                    ));
+                } else {
+                    self.mode = AppMode::Normal;
+                }
+            }
+            Action::ApplyDirectorySetup => {
+                match self.apply_directory_setup() {
+                    Ok(()) => {
+                        self.mode = AppMode::Normal;
+                    }
+                    Err(e) => {
+                        self.status = Some(StatusMessage::error(format!("{e}")));
+                    }
+                }
+            }
+
             Action::ShowStatus(text) => {
                 self.status = Some(StatusMessage::info(text));
             }
@@ -600,6 +763,17 @@ impl App {
         }
     }
 
+    /// Returns true if the directory setup should be shown.
+    #[must_use]
+    pub fn needs_directory_setup(&self) -> bool {
+        Self::requires_directory_setup(&self.config)
+    }
+
+    /// Returns the pending watcher restart path, if any.
+    pub fn take_watcher_restart(&mut self) -> Option<Utf8PathBuf> {
+        self.pending_watcher_restart.take()
+    }
+
     /// Performs a full rescan.
     fn rescan(&mut self) -> Result<ScanResult, TuiError> {
         info!("Rescanning files");
@@ -611,6 +785,55 @@ impl App {
         self.status = Some(StatusMessage::info(msg));
 
         Ok(result)
+    }
+
+    fn apply_directory_setup(&mut self) -> Result<(), TuiError> {
+        let paths = self.parse_directory_inputs()?;
+
+        self.config.scan.root_path = paths.root.clone();
+        self.config.scan.shared_path = paths.shared.clone();
+        self.config.scan.shared_2023_path = paths.shared_2023.clone();
+
+        if let Some(shared_name) = self.config.scan.shared_path.file_name() {
+            self.config.scan.shared_dir = shared_name.to_owned();
+        }
+        if let Some(shared_2023_name) = self.config.scan.shared_2023_path.file_name() {
+            self.config.scan.shared_2023_dir = shared_2023_name.to_owned();
+        }
+
+        self.rebuild_scanner()?;
+        self.pending_watcher_restart = if self.config.watch.enabled {
+            Some(self.config.scan.root_path.clone())
+        } else {
+            None
+        };
+
+        if let Err(e) = self.rescan() {
+            self.status = Some(StatusMessage::error(format!("Rescan failed: {e}")));
+        } else {
+            self.status = Some(StatusMessage::info("Directories updated"));
+        }
+        Ok(())
+    }
+
+    fn parse_directory_inputs(&self) -> Result<DirectoryPaths, TuiError> {
+        let root = parse_dir_input("WebApp.Desktop/src", &self.directory_setup.root_input)?;
+        let shared = parse_dir_input("shared", &self.directory_setup.shared_input)?;
+        let shared_2023 = parse_dir_input("shared_2023", &self.directory_setup.shared_2023_input)?;
+
+        Ok(DirectoryPaths {
+            root,
+            shared,
+            shared_2023,
+        })
+    }
+
+    fn rebuild_scanner(&mut self) -> Result<(), TuiError> {
+        let scanner_config = ScannerConfig::new(&self.config.scan.root_path)
+            .with_skip_dirs(&["node_modules", "dist", ".git"]);
+        let matcher = ModelPathMatcher::from_scan_config(&self.config.scan);
+        self.scanner = Scanner::new_with_matcher(scanner_config, matcher)?;
+        Ok(())
     }
 
     /// Rescans a specific file.
@@ -733,6 +956,44 @@ impl App {
 
         // Return action to rescan the file
         Action::RescanFile(event.path)
+    }
+}
+
+#[derive(Debug)]
+struct DirectoryPaths {
+    root: Utf8PathBuf,
+    shared: Utf8PathBuf,
+    shared_2023: Utf8PathBuf,
+}
+
+fn parse_dir_input(label: &str, input: &str) -> Result<Utf8PathBuf, TuiError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(TuiError::config(format!("{label} path is required")));
+    }
+
+    let path = Utf8PathBuf::from(trimmed);
+    if !path.exists() {
+        return Err(TuiError::config(format!("{label} path not found: {path}")));
+    }
+    if !path.is_dir() {
+        return Err(TuiError::config(format!(
+            "{label} path is not a directory: {path}"
+        )));
+    }
+
+    Ok(path)
+}
+
+fn is_valid_dir(path: &Utf8PathBuf) -> bool {
+    !path.as_str().is_empty() && path.exists() && path.is_dir()
+}
+
+impl App {
+    fn requires_directory_setup(config: &Config) -> bool {
+        !is_valid_dir(&config.scan.root_path)
+            || !is_valid_dir(&config.scan.shared_path)
+            || !is_valid_dir(&config.scan.shared_2023_path)
     }
 }
 

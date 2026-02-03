@@ -117,30 +117,35 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
     // Initialize app
     let mut app = App::new(config.clone(), scanner);
 
-    // Perform initial scan
-    info!("Starting initial scan");
-    app.initial_scan()?;
-
-    // Start file watcher if enabled
-    let mut watcher = if config.watch.enabled {
-        info!(path = %config.scan.root_path, "Starting file watcher");
-        match FileWatcher::new(
-            &config.scan.root_path,
-            &config.watch,
-            TypeScriptFilter::default(),
-        )
-        .await
-        {
-            Ok(w) => Some(w),
-            Err(e) => {
-                error!(error = %e, "Failed to start file watcher");
-                app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
-                None
-            }
-        }
-    } else {
-        debug!("File watcher disabled");
+    let mut watcher = if app.needs_directory_setup() {
+        debug!("Directory setup required; delaying initial scan and watcher");
         None
+    } else {
+        // Perform initial scan
+        info!("Starting initial scan");
+        app.initial_scan()?;
+
+        // Start file watcher if enabled
+        if config.watch.enabled {
+            info!(path = %config.scan.root_path, "Starting file watcher");
+            match FileWatcher::new(
+                &config.scan.root_path,
+                &config.watch,
+                TypeScriptFilter::default(),
+            )
+            .await
+            {
+                Ok(w) => Some(w),
+                Err(e) => {
+                    error!(error = %e, "Failed to start file watcher");
+                    app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
+                    None
+                }
+            }
+        } else {
+            debug!("File watcher disabled");
+            None
+        }
     };
 
     // Enter terminal
@@ -214,6 +219,24 @@ async fn run_event_loop(
 
             // Apply action
             app.update(action);
+
+            if let Some(root) = app.take_watcher_restart() {
+                if let Some(existing) = watcher.take() {
+                    if let Err(e) = existing.shutdown().await {
+                        error!(error = %e, "Error shutting down watcher");
+                    }
+                }
+
+                info!(path = %root, "Restarting file watcher");
+                match FileWatcher::new(&root, &app.config.watch, TypeScriptFilter::default()).await {
+                    Ok(w) => *watcher = Some(w),
+                    Err(e) => {
+                        error!(error = %e, "Failed to restart file watcher");
+                        app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
+                        *watcher = None;
+                    }
+                }
+            }
         }
 
         // Check for quit

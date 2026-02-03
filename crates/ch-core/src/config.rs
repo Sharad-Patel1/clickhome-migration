@@ -48,6 +48,12 @@ pub struct ScanConfig {
     /// Root path to the WebApp.Desktop/src directory.
     pub root_path: Utf8PathBuf,
 
+    /// Absolute path to the legacy shared directory.
+    pub shared_path: Utf8PathBuf,
+
+    /// Absolute path to the new `shared_2023` directory.
+    pub shared_2023_path: Utf8PathBuf,
+
     /// Name of the legacy shared directory (typically "shared").
     pub shared_dir: String,
 
@@ -75,6 +81,8 @@ impl Default for ScanConfig {
     fn default() -> Self {
         Self {
             root_path: Utf8PathBuf::new(),
+            shared_path: Utf8PathBuf::new(),
+            shared_2023_path: Utf8PathBuf::new(),
             shared_dir: "shared".to_owned(),
             shared_2023_dir: "shared_2023".to_owned(),
             models_subdir: "models".to_owned(),
@@ -88,6 +96,24 @@ impl Default for ScanConfig {
             ],
             max_parallel_jobs: None,
         }
+    }
+}
+
+impl ScanConfig {
+    /// Returns the legacy shared directory name for import matching.
+    #[must_use]
+    pub fn shared_dir_name(&self) -> &str {
+        self.shared_path
+            .file_name()
+            .unwrap_or(self.shared_dir.as_str())
+    }
+
+    /// Returns the `shared_2023` directory name for import matching.
+    #[must_use]
+    pub fn shared_2023_dir_name(&self) -> &str {
+        self.shared_2023_path
+            .file_name()
+            .unwrap_or(self.shared_2023_dir.as_str())
     }
 }
 
@@ -176,6 +202,17 @@ impl Default for TuiConfig {
     }
 }
 
+/// Configuration for the external editor.
+///
+/// Controls how the TUI opens files in an external editor.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EditorConfig {
+    /// Explicit editor command override (e.g., "nvim", "code", "cursor").
+    /// If not set, uses $VISUAL, then $EDITOR, then fallback list.
+    pub editor: Option<String>,
+}
+
 /// Root configuration for the ch-migration tool.
 ///
 /// Combines all component configurations into a single structure that can be
@@ -203,6 +240,9 @@ pub struct Config {
 
     /// Terminal UI configuration.
     pub tui: TuiConfig,
+
+    /// External editor configuration.
+    pub editor: EditorConfig,
 }
 
 
@@ -213,6 +253,8 @@ mod tests {
     #[test]
     fn test_scan_config_defaults() {
         let config = ScanConfig::default();
+        assert!(config.shared_path.as_str().is_empty());
+        assert!(config.shared_2023_path.as_str().is_empty());
         assert_eq!(config.shared_dir, "shared");
         assert_eq!(config.shared_2023_dir, "shared_2023");
         assert_eq!(config.models_subdir, "models");
@@ -252,6 +294,7 @@ mod tests {
         // Other fields should have defaults
         assert_eq!(config.scan.shared_2023_dir, "shared_2023");
         assert_eq!(config.watch.debounce_ms, 100);
+        assert!(config.editor.editor.is_none());
     }
 
     #[test]

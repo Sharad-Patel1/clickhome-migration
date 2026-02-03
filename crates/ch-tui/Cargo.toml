@@ -12,6 +12,7 @@ description = "Terminal user interface components using Ratatui"
 # Internal crates
 ch-core.workspace = true
 ch-scanner.workspace = true
+ch-ts-parser.workspace = true
 ch-watcher.workspace = true
 
 # TUI framework

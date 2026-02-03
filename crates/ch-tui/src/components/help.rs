@@ -81,6 +81,11 @@ const KEY_BINDINGS: &[KeyBinding] = &[
         mode: "Normal",
     },
     KeyBinding {
+        key: "d",
+        description: "Configure directories",
+        mode: "Normal",
+    },
+    KeyBinding {
         key: "?",
         description: "Toggle help panel",
         mode: "Normal",

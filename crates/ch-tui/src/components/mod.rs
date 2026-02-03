@@ -7,7 +7,7 @@
 //!
 //! - **Widgets** (`Widget` trait): Stateless rendering - `HeaderBar`, `StatsPanel`, `StatusBar`
 //! - **Stateful Widgets** (`StatefulWidget` trait): Selection/scroll state - `FileListView`, `DetailPane`
-//! - **Overlays**: Modal overlays - `HelpPanel`, `FilterInput`
+//! - **Overlays**: Modal overlays - `HelpPanel`, `FilterInput`, `DirectoryInput`
 //!
 //! # Usage
 //!
@@ -16,6 +16,7 @@
 //! ```
 
 mod detail_pane;
+mod directory_input;
 mod file_list;
 mod filter_input;
 mod header;
@@ -24,6 +25,7 @@ mod stats_panel;
 mod status_bar;
 
 pub use detail_pane::DetailPane;
+pub use directory_input::DirectoryInput;
 pub use file_list::FileListView;
 pub use filter_input::FilterInput;
 pub use header::HeaderBar;

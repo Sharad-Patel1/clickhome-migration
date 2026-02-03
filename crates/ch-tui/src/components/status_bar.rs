@@ -41,6 +41,7 @@ impl<'a> StatusBar<'a> {
             AppMode::Normal => "NORMAL",
             AppMode::Filtering => "FILTER",
             AppMode::Help => "HELP",
+            AppMode::DirectorySetup => "SETUP",
         };
         spans.push(Span::styled(
             format!(" {mode_text} "),

@@ -26,7 +26,8 @@ use ratatui::Frame;
 
 use crate::app::{App, AppMode, Focus};
 use crate::components::{
-    DetailPane, FileListView, FilterInput, HeaderBar, HelpPanel, StatsPanel, StatusBar,
+    DetailPane, DirectoryInput, FileListView, FilterInput, HeaderBar, HelpPanel, StatsPanel,
+    StatusBar,
 };
 use crate::theme::Theme;
 
@@ -76,6 +77,13 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
         let help_panel = HelpPanel::new(theme);
         let help_area = centered_rect(60, 70, area);
         frame.render_widget(&help_panel, help_area);
+    }
+
+    // Render directory setup overlay if active
+    if app.mode == AppMode::DirectorySetup {
+        let dir_input = DirectoryInput::new(&app.directory_setup, theme);
+        let dir_area = centered_rect(80, 30, area);
+        frame.render_widget(&dir_input, dir_area);
     }
 }
 

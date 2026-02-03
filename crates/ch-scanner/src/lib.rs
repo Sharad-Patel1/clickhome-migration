@@ -80,6 +80,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileInfo, MigrationStatus};
 use tracing::{debug, info, warn};
 
+use ch_ts_parser::ModelPathMatcher;
+
 /// Configuration for the scanner.
 ///
 /// # Examples
@@ -185,6 +187,8 @@ pub struct ScanResult {
 pub struct Scanner {
     /// Scanner configuration.
     config: ScanConfig,
+    /// Model path matcher for import detection.
+    model_path_matcher: ModelPathMatcher,
     /// File analysis results cache.
     cache: ScanCache,
     /// Statistics counters.
@@ -213,6 +217,24 @@ impl Scanner {
     /// let scanner = Scanner::new(config)?;
     /// ```
     pub fn new(config: ScanConfig) -> Result<Self, ScanError> {
+        Self::new_with_matcher(config, ModelPathMatcher::default())
+    }
+
+    /// Creates a new scanner with a custom model path matcher.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The scanner configuration
+    /// * `matcher` - Model path matcher for import detection
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScanError::Config`] if the configuration is invalid
+    /// (e.g., root directory doesn't exist).
+    pub fn new_with_matcher(
+        config: ScanConfig,
+        matcher: ModelPathMatcher,
+    ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
             return Err(ScanError::config(format!(
@@ -232,6 +254,7 @@ impl Scanner {
 
         Ok(Self {
             config,
+            model_path_matcher: matcher,
             cache: ScanCache::new(),
             stats: ScanStats::new(),
         })
@@ -274,7 +297,7 @@ impl Scanner {
 
         // Analyze files in parallel
         let analyzer = FileAnalyzer::new();
-        let results = analyzer.analyze_files(&paths);
+        let results = analyzer.analyze_files(&paths, &self.model_path_matcher);
 
         // Process results
         let mut errors = Vec::new();
@@ -343,7 +366,7 @@ impl Scanner {
         debug!(count = paths.len(), "Re-scanning files");
 
         let analyzer = FileAnalyzer::new();
-        let results = analyzer.analyze_files(paths);
+        let results = analyzer.analyze_files(paths, &self.model_path_matcher);
 
         results
             .into_iter()

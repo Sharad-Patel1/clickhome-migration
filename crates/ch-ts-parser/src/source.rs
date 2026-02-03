@@ -18,7 +18,65 @@
 //! Other imports from shared directories (e.g., `shared/utils/`, `shared/services/`)
 //! are **not** considered model imports and will return `None`.
 
-use ch_core::ModelSource;
+use ch_core::{ModelSource, ScanConfig};
+
+/// Precomputed path matcher for shared model imports.
+#[derive(Debug, Clone)]
+pub struct ModelPathMatcher {
+    modern_dir: String,
+    legacy_models: String,
+    legacy_models_slash: String,
+    legacy_interfaces: String,
+    legacy_interfaces_slash: String,
+    modern_models: String,
+    modern_models_slash: String,
+    modern_interfaces: String,
+    modern_interfaces_slash: String,
+}
+
+impl ModelPathMatcher {
+    /// Creates a matcher from directory names.
+    #[must_use]
+    pub fn new(shared_dir: &str, shared_2023_dir: &str, models_subdir: &str) -> Self {
+        let legacy_models = format!("{shared_dir}/{models_subdir}");
+        let legacy_models_slash = format!("/{legacy_models}");
+        let legacy_interfaces = format!("{shared_dir}/interfaces");
+        let legacy_interfaces_slash = format!("/{legacy_interfaces}");
+
+        let modern_models = format!("{shared_2023_dir}/{models_subdir}");
+        let modern_models_slash = format!("/{modern_models}");
+        let modern_interfaces = format!("{shared_2023_dir}/interfaces");
+        let modern_interfaces_slash = format!("/{modern_interfaces}");
+
+        Self {
+            modern_dir: shared_2023_dir.to_owned(),
+            legacy_models,
+            legacy_models_slash,
+            legacy_interfaces,
+            legacy_interfaces_slash,
+            modern_models,
+            modern_models_slash,
+            modern_interfaces,
+            modern_interfaces_slash,
+        }
+    }
+
+    /// Creates a matcher from scan configuration.
+    #[must_use]
+    pub fn from_scan_config(config: &ScanConfig) -> Self {
+        Self::new(
+            config.shared_dir_name(),
+            config.shared_2023_dir_name(),
+            &config.models_subdir,
+        )
+    }
+}
+
+impl Default for ModelPathMatcher {
+    fn default() -> Self {
+        Self::new("shared", "shared_2023", "models")
+    }
+}
 
 /// Detects the [`ModelSource`] from an import path.
 ///
@@ -85,6 +143,28 @@ pub fn detect_model_source(import_path: &str) -> Option<ModelSource> {
     None
 }
 
+/// Detects the [`ModelSource`] using a configured matcher.
+///
+/// This is the configurable variant of [`detect_model_source`], allowing
+/// directory names and model subdirectories to be customized.
+#[inline]
+pub fn detect_model_source_with(
+    import_path: &str,
+    matcher: &ModelPathMatcher,
+) -> Option<ModelSource> {
+    let path = strip_quotes(import_path);
+
+    if is_shared_2023_model_import_with(path, matcher) {
+        return Some(ModelSource::Shared2023);
+    }
+
+    if is_shared_legacy_model_import_with(path, matcher) {
+        return Some(ModelSource::SharedLegacy);
+    }
+
+    None
+}
+
 /// Strips leading and trailing quotes from a string literal.
 ///
 /// Handles both single quotes (`'`) and double quotes (`"`).
@@ -140,6 +220,38 @@ fn is_shared_legacy_model_import(path: &str) -> bool {
         || path.ends_with("/shared/interfaces")
         || path == "shared/models"
         || path == "shared/interfaces"
+}
+
+#[inline]
+fn is_shared_2023_model_import_with(path: &str, matcher: &ModelPathMatcher) -> bool {
+    matches_path(path, &matcher.modern_models, &matcher.modern_models_slash)
+        || matches_path(
+            path,
+            &matcher.modern_interfaces,
+            &matcher.modern_interfaces_slash,
+        )
+}
+
+#[inline]
+fn is_shared_legacy_model_import_with(path: &str, matcher: &ModelPathMatcher) -> bool {
+    if path.contains(&matcher.modern_dir) {
+        return false;
+    }
+
+    matches_path(path, &matcher.legacy_models, &matcher.legacy_models_slash)
+        || matches_path(
+            path,
+            &matcher.legacy_interfaces,
+            &matcher.legacy_interfaces_slash,
+        )
+}
+
+#[inline]
+fn matches_path(path: &str, needle: &str, needle_slash: &str) -> bool {
+    path.contains(needle_slash)
+        || path.starts_with(needle)
+        || path.ends_with(needle_slash)
+        || path == needle
 }
 
 /// Extracts the model name from an import path.

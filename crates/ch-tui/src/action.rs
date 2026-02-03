@@ -112,6 +112,18 @@ pub enum Action {
     ClearStatus,
 
     // =========================================================================
+    // Directory Setup
+    // =========================================================================
+    /// Enter directory setup mode.
+    EnterDirectorySetup,
+
+    /// Exit directory setup mode.
+    ExitDirectorySetup,
+
+    /// Apply directory setup changes.
+    ApplyDirectorySetup,
+
+    // =========================================================================
     // Application Control
     // =========================================================================
     /// Quit the application.

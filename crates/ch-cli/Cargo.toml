@@ -17,6 +17,7 @@ path = "src/main.rs"
 ch-core.workspace = true
 ch-tui.workspace = true
 ch-scanner.workspace = true
+ch-ts-parser.workspace = true
 ch-watcher.workspace = true
 
 # CLI argument parsing

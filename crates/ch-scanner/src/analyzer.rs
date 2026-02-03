@@ -45,7 +45,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelSource};
-use ch_ts_parser::ArenaParser;
+use ch_ts_parser::{detect_model_source_with, ArenaParser, ModelPathMatcher};
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use smallvec::SmallVec;
@@ -120,6 +120,7 @@ impl FileAnalyzer {
     pub fn analyze_files(
         &self,
         paths: &[Utf8PathBuf],
+        matcher: &ModelPathMatcher,
     ) -> Vec<(Utf8PathBuf, Result<FileInfo, ScanError>)> {
         // Create a Herd for per-thread arenas
         let herd = Herd::new();
@@ -141,6 +142,7 @@ impl FileAnalyzer {
                         ts_parser.as_mut(),
                         tsx_parser.as_mut(),
                         member.as_bump(),
+                        matcher,
                     );
                     (path.clone(), result)
                 },
@@ -165,7 +167,11 @@ impl FileAnalyzer {
     ///
     /// - [`ScanError::Read`] if the file cannot be read
     /// - [`ScanError::Parse`] if the file cannot be parsed
-    pub fn analyze_single(&self, path: &Utf8Path) -> Result<FileInfo, ScanError> {
+    pub fn analyze_single(
+        &self,
+        path: &Utf8Path,
+        matcher: &ModelPathMatcher,
+    ) -> Result<FileInfo, ScanError> {
         let arena = bumpalo::Bump::new();
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
 
@@ -181,6 +187,7 @@ impl FileAnalyzer {
             Some(&mut parser),
             None,
             &arena,
+            matcher,
         )
     }
 
@@ -192,6 +199,7 @@ impl FileAnalyzer {
         ts_parser: Option<&mut ArenaParser>,
         tsx_parser: Option<&mut ArenaParser>,
         arena: &bumpalo::Bump,
+        matcher: &ModelPathMatcher,
     ) -> Result<FileInfo, ScanError> {
         // Read file contents
         let contents = fs::read_to_string(path.as_std_path())
@@ -221,11 +229,15 @@ impl FileAnalyzer {
             .map_err(|e| ScanError::parse(path, e))?;
 
         // Convert imports to owned and calculate status
-        let imports: SmallVec<[ImportInfo; 8]> = parse_result
+        let mut imports: SmallVec<[ImportInfo; 8]> = parse_result
             .imports
             .into_iter()
             .map(ch_ts_parser::BumpImportInfo::into_owned)
             .collect();
+
+        for import in &mut imports {
+            import.source = detect_model_source_with(&import.path, matcher);
+        }
 
         let status = determine_status(&imports);
 
