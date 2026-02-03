@@ -122,10 +122,10 @@ let new_tree = parser.parse(new_source, Some(&old_tree));
 **Key Components**:
 - `walker.rs` - Directory traversal using `ignore` crate (respects `.gitignore`)
 - `analyzer.rs` - Orchestrates parsing and aggregates results
-- `cache.rs` - `DashMap`-based concurrent cache for analysis results
+- `cache.rs` - `FxHashMap` + `RwLock` concurrent cache for analysis results
 - `stats.rs` - Statistics aggregation for migration progress
 
-**Dependencies**: `ignore`, `rayon`, `dashmap`, `parking_lot`
+**Dependencies**: `ignore`, `rayon`, `parking_lot`
 
 **Design Notes**:
 
@@ -153,10 +153,10 @@ Scanning Pipeline:
                    └──────┬──────┘
                           │ Analysis results
                           ▼
-                   ┌─────────────┐
-                   │  DashMap    │
-                   │   Cache     │
-                   └─────────────┘
+                   ┌─────────────────────┐
+                   │  FxHashMap + RwLock │
+                   │       Cache         │
+                   └─────────────────────┘
 ```
 
 **Why `ignore` over `walkdir`**:
@@ -450,7 +450,7 @@ Developer saves file
 |-----------|----------|
 | Initial scan | Rayon parallel iterator over files |
 | File parsing | Per-thread parsers and arenas |
-| Cache updates | Lock-free DashMap |
+| Cache updates | RwLock-protected FxHashMap |
 | Event loop | Tokio async with select! |
 | File watching | spawn_blocking bridge to async |
 

@@ -1,16 +1,15 @@
 //! Concurrent cache for scan results.
 //!
 //! This module provides [`ScanCache`], a thread-safe cache backed by
-//! [`DashMap`] for storing file analysis results.
+//! an `FxHashMap` guarded by a `RwLock` for storing file analysis results.
 //!
-//! # Safety Pattern
+//! # Concurrency Pattern
 //!
-//! To avoid `DashMap` deadlocks, this cache:
+//! This cache:
 //!
-//! - **Never exposes `Ref` types** publicly
 //! - **Clones data** on `get()` operations
-//! - **Uses short-lived scopes** for internal refs
-//! - **Avoids holding refs across operations**
+//! - **Uses read locks** for lookups and queries
+//! - **Uses write locks** for mutations and clears
 //!
 //! # Examples
 //!
@@ -32,12 +31,12 @@
 //! ```
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileInfo, MigrationStatus};
-use dashmap::DashMap;
+use ch_core::{fx_hash_map_with_capacity, FxHashMap, FileInfo, MigrationStatus};
+use parking_lot::RwLock;
 
 /// A thread-safe cache for storing [`FileInfo`] results.
 ///
-/// Uses [`DashMap`] for concurrent access from multiple threads.
+/// Uses an `FxHashMap` guarded by a `RwLock` for concurrent access.
 /// All public methods clone data to avoid exposing internal references.
 ///
 /// # Design
@@ -71,7 +70,7 @@ use dashmap::DashMap;
 #[derive(Debug, Default)]
 pub struct ScanCache {
     /// The underlying concurrent map.
-    files: DashMap<Utf8PathBuf, FileInfo>,
+    files: RwLock<FxHashMap<Utf8PathBuf, FileInfo>>,
 }
 
 impl ScanCache {
@@ -107,7 +106,7 @@ impl ScanCache {
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            files: DashMap::with_capacity(capacity),
+            files: RwLock::new(fx_hash_map_with_capacity(capacity)),
         }
     }
 
@@ -132,7 +131,7 @@ impl ScanCache {
     /// assert_eq!(cache.len(), 1);
     /// ```
     pub fn insert(&self, file: FileInfo) {
-        self.files.insert(file.path.clone(), file);
+        self.files.write().insert(file.path.clone(), file);
     }
 
     /// Returns a clone of the file info for the given path, if present.
@@ -161,7 +160,7 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn get(&self, path: &Utf8PathBuf) -> Option<FileInfo> {
-        self.files.get(path).map(|r| r.clone())
+        self.files.read().get(path).cloned()
     }
 
     /// Returns a clone of the file info for the given path reference, if present.
@@ -175,7 +174,7 @@ impl ScanCache {
     /// A clone of the [`FileInfo`] if found, or `None`.
     #[must_use]
     pub fn get_by_path(&self, path: &Utf8Path) -> Option<FileInfo> {
-        self.files.get(path).map(|r| r.clone())
+        self.files.read().get(path).cloned()
     }
 
     /// Checks if a file is in the cache.
@@ -199,7 +198,7 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn contains(&self, path: &Utf8PathBuf) -> bool {
-        self.files.contains_key(path)
+        self.files.read().contains_key(path)
     }
 
     /// Removes a file from the cache.
@@ -212,7 +211,7 @@ impl ScanCache {
     ///
     /// The removed [`FileInfo`] if found, or `None`.
     pub fn remove(&self, path: &Utf8PathBuf) -> Option<FileInfo> {
-        self.files.remove(path).map(|(_, v)| v)
+        self.files.write().remove(path)
     }
 
     /// Returns the number of files in the cache.
@@ -227,7 +226,7 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn len(&self) -> usize {
-        self.files.len()
+        self.files.read().len()
     }
 
     /// Returns `true` if the cache is empty.
@@ -242,12 +241,12 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
+        self.files.read().is_empty()
     }
 
     /// Clears all files from the cache.
     pub fn clear(&self) {
-        self.files.clear();
+        self.files.write().clear();
     }
 
     /// Checks if a file needs to be updated based on content hash.
@@ -288,6 +287,7 @@ impl ScanCache {
     #[must_use]
     pub fn needs_update(&self, path: &Utf8PathBuf, content_hash: u64) -> bool {
         self.files
+            .read()
             .get(path)
             .is_none_or(|file| file.content_hash != content_hash)
     }
@@ -321,9 +321,10 @@ impl ScanCache {
     #[must_use]
     pub fn files_with_status(&self, status: MigrationStatus) -> Vec<FileInfo> {
         self.files
-            .iter()
-            .filter(|r| r.status == status)
-            .map(|r| r.clone())
+            .read()
+            .values()
+            .filter(|file| file.status == status)
+            .cloned()
             .collect()
     }
 
@@ -351,9 +352,10 @@ impl ScanCache {
     #[must_use]
     pub fn files_needing_migration(&self) -> Vec<FileInfo> {
         self.files
-            .iter()
-            .filter(|r| r.status.needs_migration())
-            .map(|r| r.clone())
+            .read()
+            .values()
+            .filter(|file| file.status.needs_migration())
+            .cloned()
             .collect()
     }
 
@@ -364,7 +366,7 @@ impl ScanCache {
     /// A vector of cloned [`FileInfo`] for all cached files.
     #[must_use]
     pub fn all_files(&self) -> Vec<FileInfo> {
-        self.files.iter().map(|r| r.clone()).collect()
+        self.files.read().values().cloned().collect()
     }
 
     /// Returns all file paths in the cache.
@@ -374,7 +376,7 @@ impl ScanCache {
     /// A vector of cloned paths for all cached files.
     #[must_use]
     pub fn all_paths(&self) -> Vec<Utf8PathBuf> {
-        self.files.iter().map(|r| r.key().clone()).collect()
+        self.files.read().keys().cloned().collect()
     }
 }
 

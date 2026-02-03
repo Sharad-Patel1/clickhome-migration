@@ -20,7 +20,6 @@ ignore.workspace = true
 rayon.workspace = true
 
 # Concurrent caching
-dashmap.workspace = true
 parking_lot.workspace = true
 
 # Arena allocation
@@ -47,6 +46,7 @@ tracing.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 insta.workspace = true
 serde_json.workspace = true
 

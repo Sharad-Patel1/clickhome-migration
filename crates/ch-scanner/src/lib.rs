@@ -10,7 +10,7 @@
 //!
 //! - [`FileWalker`]: Directory traversal respecting `.gitignore` patterns
 //! - [`FileAnalyzer`]: Parallel file processing with rayon + bumpalo arenas
-//! - [`ScanCache`]: Concurrent caching with `DashMap`
+//! - [`ScanCache`]: Concurrent caching with `FxHashMap` + `RwLock`
 //! - [`ScanStats`]: Atomic statistics for progress tracking
 //!
 //! # Example
@@ -50,7 +50,7 @@
 //!     │       ├── Herd (per-thread arenas)
 //!     │       └── ArenaParser (ch-ts-parser)
 //!     │
-//!     ├── ScanCache (DashMap storage)
+//!     ├── ScanCache (FxHashMap + RwLock)
 //!     │
 //!     └── ScanStats (atomic counters)
 //! ```
