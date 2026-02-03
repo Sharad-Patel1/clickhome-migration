@@ -20,6 +20,8 @@ crossterm.workspace = true
 
 # Async runtime
 tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
 
 # Synchronization
 parking_lot.workspace = true
@@ -30,9 +32,13 @@ unicode-width.workspace = true
 # Error handling
 anyhow.workspace = true
 color-eyre.workspace = true
+thiserror.workspace = true
 
 # Fast hashing
 rustc-hash.workspace = true
+
+# Path handling
+camino.workspace = true
 
 # Tracing
 tracing.workspace = true

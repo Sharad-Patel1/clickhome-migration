@@ -101,12 +101,16 @@ impl Default for ScanConfig {
 /// use ch_core::WatchConfig;
 ///
 /// let config = WatchConfig::default();
+/// assert!(config.enabled);
 /// assert_eq!(config.debounce_ms, 100);
 /// assert!(config.recursive);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WatchConfig {
+    /// Whether file watching is enabled.
+    pub enabled: bool,
+
     /// Debounce window in milliseconds.
     ///
     /// Multiple file changes within this window are batched into a single event.
@@ -119,6 +123,7 @@ pub struct WatchConfig {
 impl Default for WatchConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             debounce_ms: 100,
             recursive: true,
         }
@@ -136,15 +141,22 @@ impl Default for WatchConfig {
 ///
 /// let config = TuiConfig::default();
 /// assert_eq!(config.tick_rate_ms, 250);
+/// assert_eq!(config.frame_rate, 60);
 /// assert_eq!(config.color_scheme, ColorScheme::Auto);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TuiConfig {
-    /// UI refresh rate in milliseconds.
+    /// UI tick rate in milliseconds (for periodic updates).
     ///
-    /// Lower values provide smoother animations but use more CPU.
+    /// Controls how often the app checks for state changes that don't
+    /// come from events (e.g., clearing stale status messages).
     pub tick_rate_ms: u64,
+
+    /// Frame rate for rendering (frames per second).
+    ///
+    /// Lower values reduce CPU usage but make the UI feel less responsive.
+    pub frame_rate: u64,
 
     /// Whether to show hidden files in the file list.
     pub show_hidden: bool,
@@ -157,6 +169,7 @@ impl Default for TuiConfig {
     fn default() -> Self {
         Self {
             tick_rate_ms: 250,
+            frame_rate: 60,
             show_hidden: false,
             color_scheme: ColorScheme::Auto,
         }
@@ -209,6 +222,7 @@ mod tests {
     #[test]
     fn test_watch_config_defaults() {
         let config = WatchConfig::default();
+        assert!(config.enabled);
         assert_eq!(config.debounce_ms, 100);
         assert!(config.recursive);
     }
@@ -217,6 +231,7 @@ mod tests {
     fn test_tui_config_defaults() {
         let config = TuiConfig::default();
         assert_eq!(config.tick_rate_ms, 250);
+        assert_eq!(config.frame_rate, 60);
         assert!(!config.show_hidden);
         assert_eq!(config.color_scheme, ColorScheme::Auto);
     }
