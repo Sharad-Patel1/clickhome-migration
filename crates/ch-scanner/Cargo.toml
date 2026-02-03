@@ -23,6 +23,13 @@ rayon.workspace = true
 dashmap.workspace = true
 parking_lot.workspace = true
 
+# Arena allocation
+bumpalo.workspace = true
+bumpalo-herd.workspace = true
+
+# Memory-efficient collections
+smallvec.workspace = true
+
 # Path handling
 camino.workspace = true
 
@@ -36,8 +43,12 @@ rustc-hash.workspace = true
 # Tracing
 tracing.workspace = true
 
+# Serialization (for StatsSnapshot)
+serde.workspace = true
+
 [dev-dependencies]
 insta.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

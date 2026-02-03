@@ -221,6 +221,8 @@ name = "ch-scanner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bumpalo",
+ "bumpalo-herd",
  "camino",
  "ch-core",
  "ch-ts-parser",
@@ -230,6 +232,9 @@ dependencies = [
  "parking_lot",
  "rayon",
  "rustc-hash",
+ "serde",
+ "serde_json",
+ "smallvec",
  "thiserror",
  "tracing",
 ]
