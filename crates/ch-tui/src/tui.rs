@@ -161,6 +161,9 @@ impl Tui {
     pub fn enter(&mut self) -> Result<(), TuiError> {
         debug!("Entering terminal");
 
+        // Reset cancellation token for re-entry after exit (e.g., returning from editor)
+        self.cancellation_token = CancellationToken::new();
+
         enable_raw_mode()?;
         io::stdout().execute(EnterAlternateScreen)?;
         io::stdout().execute(EnableMouseCapture)?;
