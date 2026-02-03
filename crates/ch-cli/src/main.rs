@@ -48,20 +48,26 @@ struct Cli {
     command: Commands,
 
     /// Path to WebApp.Desktop/src directory.
+    ///
+    /// Defaults to `./WebApp.Desktop/src` if not specified.
     #[arg(short, long, global = true, env = "CH_MIGRATE_PATH")]
     path: Option<Utf8PathBuf>,
 
     /// Absolute path to legacy shared directory.
+    ///
+    /// Defaults to `./WebApp.Desktop/src/app/shared` if not specified.
     #[arg(long, global = true, env = "CH_MIGRATE_SHARED_PATH")]
     shared_path: Option<Utf8PathBuf>,
 
     /// Absolute path to `shared_2023` directory.
+    ///
+    /// Defaults to `./WebApp.Desktop/src/app/shared_2023` if not specified.
     #[arg(long, global = true, env = "CH_MIGRATE_SHARED_2023_PATH")]
     shared_2023_path: Option<Utf8PathBuf>,
 
     /// Path to app directory to scan for model consumers.
     ///
-    /// Defaults to `<path>/app` if not specified. This restricts scanning
+    /// Defaults to `./WebApp.Desktop/src/app` if not specified. This restricts scanning
     /// to only the application code directory, excluding shared model definitions.
     #[arg(long, global = true, env = "CH_MIGRATE_APP_PATH")]
     app_path: Option<Utf8PathBuf>,
@@ -157,7 +163,7 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
     let path = cli
         .path
         .clone()
-        .ok_or_else(|| color_eyre::eyre::eyre!("Path is required. Use --path or set CH_MIGRATE_PATH environment variable."))?;
+        .unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
 
     // Validate path exists
     if !path.exists() {
@@ -180,13 +186,13 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
     config.scan.shared_path = cli
         .shared_path
         .clone()
-        .unwrap_or_else(|| config.scan.root_path.join(&config.scan.shared_dir));
+        .unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
     config.scan.shared_2023_path = cli
         .shared_2023_path
         .clone()
-        .unwrap_or_else(|| config.scan.root_path.join(&config.scan.shared_2023_dir));
+        .unwrap_or_else(|| config.scan.root_path.join("app").join("shared_2023"));
 
-    // Set app_path: use CLI arg or default to root_path/app
+    // Set app_path: use CLI arg or default to ./WebApp.Desktop/src/app
     config.scan.app_path = cli
         .app_path
         .clone()
