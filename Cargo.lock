@@ -296,13 +296,14 @@ dependencies = [
 name = "ch-watcher"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "camino",
  "ch-core",
  "insta",
  "notify",
  "notify-debouncer-mini",
- "parking_lot",
+ "serde",
+ "smallvec",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

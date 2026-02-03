@@ -19,21 +19,25 @@ notify-debouncer-mini.workspace = true
 # Async runtime (for channels and spawn_blocking)
 tokio.workspace = true
 
-# Synchronization
-parking_lot.workspace = true
-
 # Path handling
 camino.workspace = true
 
 # Error handling
 thiserror.workspace = true
-anyhow.workspace = true
 
 # Tracing
 tracing.workspace = true
 
+# Collections
+smallvec.workspace = true
+
+# Serialization (for EventBatchStats)
+serde.workspace = true
+
 [dev-dependencies]
 insta.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tempfile = "3.14"
 
 [lints]
 workspace = true
