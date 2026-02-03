@@ -4,7 +4,7 @@ use std::env;
 use std::path::Path;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::Config;
+use ch_core::{Config, SourceLocation};
 
 use crate::error::TuiError;
 use crate::toolchain;
@@ -38,6 +38,25 @@ impl EditorCommand {
             self.args.push("--wait".to_owned());
         }
         self
+    }
+}
+
+fn location_args(kind: EditorKind, path: &Utf8Path, location: Option<SourceLocation>) -> Vec<String> {
+    let Some(location) = location.filter(|loc| loc.line > 0) else {
+        return vec![path.to_string()];
+    };
+
+    let line = location.line;
+    let column = location.column.saturating_add(1);
+
+    match kind {
+        EditorKind::Cursor | EditorKind::VsCode => vec![format!("{}:{line}:{column}", path)],
+        EditorKind::Nvim | EditorKind::Vim => vec![
+            format!("+call cursor({line},{column})"),
+            path.to_string(),
+        ],
+        EditorKind::Nano => vec![format!("+{line},{column}"), path.to_string()],
+        EditorKind::Other => vec![path.to_string()],
     }
 }
 
@@ -117,6 +136,7 @@ pub fn run_editor(
     root: &Utf8Path,
     config: &Config,
     tui: &mut Tui,
+    location: Option<SourceLocation>,
 ) -> Result<(), TuiError> {
     let editor = resolve_editor(config)?;
     let absolute_path = resolve_absolute_path(path, root);
@@ -125,7 +145,11 @@ pub fn run_editor(
 
     let editor_result = (|| {
         let mut command = toolchain::command(&editor.program, root);
-        command.args(&editor.args).arg(absolute_path.as_str());
+        command.args(&editor.args);
+        if matches!(editor.kind, EditorKind::Cursor | EditorKind::VsCode) && location.is_some() {
+            command.arg("--goto");
+        }
+        command.args(location_args(editor.kind, absolute_path.as_path(), location));
 
         let status = command.status()?;
         if status.success() {

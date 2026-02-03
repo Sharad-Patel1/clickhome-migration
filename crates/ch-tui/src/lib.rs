@@ -222,10 +222,14 @@ async fn run_event_loop(
             // Apply action
             match action {
                 Action::OpenInEditor => {
-                    let selected_path = app.selected_file().map(|file| file.path.clone());
-                    if let Some(path) = selected_path {
+                    let selected = app.selected_file().map(|file| {
+                        let legacy_location = file.legacy_imports().next().map(|import| import.location);
+                        let fallback_location = file.imports.first().map(|import| import.location);
+                        (file.path.clone(), legacy_location.or(fallback_location))
+                    });
+                    if let Some((path, location)) = selected {
                         if let Err(e) =
-                            editor::run_editor(&path, &app.config.scan.root_path, &app.config, tui)
+                            editor::run_editor(&path, &app.config.scan.root_path, &app.config, tui, location)
                         {
                             app.status = Some(StatusMessage::error(format!("Editor failed: {e}")));
                         }
