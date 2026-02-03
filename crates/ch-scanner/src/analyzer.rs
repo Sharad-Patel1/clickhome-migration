@@ -13,6 +13,12 @@
 //! 3. Per-thread state (parser + arena) is initialized via `map_init()`
 //! 4. Results are converted to owned data before arena scope ends
 //!
+//! # Registry-Based Filtering
+//!
+//! When a [`ModelRegistry`](ch_core::ModelRegistry) is provided, imports are filtered
+//! to only include those that reference actual model exports. This eliminates false
+//! positives from utility exports in the shared directories.
+//!
 //! # Performance
 //!
 //! - **Zero lock contention**: Per-thread arenas via `bumpalo_herd::Herd`
@@ -28,7 +34,7 @@
 //! let analyzer = FileAnalyzer::new();
 //! let paths: Vec<Utf8PathBuf> = vec![/* ... */];
 //!
-//! let results = analyzer.analyze_files(&paths);
+//! let results = analyzer.analyze_files(&paths, &matcher, None);
 //!
 //! for (path, result) in &results {
 //!     match result {
@@ -44,7 +50,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelSource};
+use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelRegistry, ModelSource};
 use ch_ts_parser::{detect_model_source_with, ArenaParser, ModelPathMatcher};
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -104,17 +110,26 @@ impl FileAnalyzer {
     /// # Arguments
     ///
     /// * `paths` - Slice of file paths to analyze
+    /// * `matcher` - Model path matcher for detecting shared directory imports
+    /// * `registry` - Optional model registry for filtering imports to actual models
     ///
     /// # Returns
     ///
     /// A vector of `(path, Result<FileInfo, ScanError>)` tuples.
     /// Failed analyses return errors while successful ones continue.
     ///
+    /// # Registry Filtering
+    ///
+    /// When a registry is provided, imports are validated against it:
+    /// - Only imports where at least one imported name exists in the registry
+    ///   are marked with a model source
+    /// - This prevents false positives from utility exports in shared directories
+    ///
     /// # Examples
     ///
     /// ```ignore
     /// let analyzer = FileAnalyzer::new();
-    /// let results = analyzer.analyze_files(&paths);
+    /// let results = analyzer.analyze_files(&paths, &matcher, Some(&registry));
     ///
     /// let successful: Vec<_> = results
     ///     .into_iter()
@@ -126,6 +141,7 @@ impl FileAnalyzer {
         &self,
         paths: &[Utf8PathBuf],
         matcher: &ModelPathMatcher,
+        registry: Option<&ModelRegistry>,
     ) -> Vec<(Utf8PathBuf, Result<FileInfo, ScanError>)> {
         // Create a Herd for per-thread arenas
         let herd = Herd::new();
@@ -148,6 +164,7 @@ impl FileAnalyzer {
                         tsx_parser.as_mut(),
                         member.as_bump(),
                         matcher,
+                        registry,
                     );
                     (path.clone(), result)
                 },
@@ -165,6 +182,7 @@ impl FileAnalyzer {
     ///
     /// * `paths` - Slice of file paths to analyze
     /// * `matcher` - Model path matcher for import detection
+    /// * `registry` - Optional model registry for filtering imports
     /// * `tx` - Channel sender for streaming updates
     /// * `cache` - Cache to populate with successful results
     /// * `stats` - Statistics to update atomically
@@ -183,6 +201,7 @@ impl FileAnalyzer {
         &self,
         paths: &[Utf8PathBuf],
         matcher: &ModelPathMatcher,
+        registry: Option<&ModelRegistry>,
         tx: &mpsc::Sender<ScanUpdate>,
         cache: &ScanCache,
         stats: &ScanStats,
@@ -212,6 +231,7 @@ impl FileAnalyzer {
                         tsx_parser.as_mut(),
                         member.as_bump(),
                         matcher,
+                        registry,
                     );
 
                     match result {
@@ -260,6 +280,8 @@ impl FileAnalyzer {
     /// # Arguments
     ///
     /// * `path` - The file path to analyze
+    /// * `matcher` - Model path matcher for detecting shared directory imports
+    /// * `registry` - Optional model registry for filtering imports
     ///
     /// # Returns
     ///
@@ -273,6 +295,7 @@ impl FileAnalyzer {
         &self,
         path: &Utf8Path,
         matcher: &ModelPathMatcher,
+        registry: Option<&ModelRegistry>,
     ) -> Result<FileInfo, ScanError> {
         let arena = bumpalo::Bump::new();
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
@@ -290,6 +313,7 @@ impl FileAnalyzer {
             None,
             &arena,
             matcher,
+            registry,
         )
     }
 
@@ -302,6 +326,7 @@ impl FileAnalyzer {
         tsx_parser: Option<&mut ArenaParser>,
         arena: &bumpalo::Bump,
         matcher: &ModelPathMatcher,
+        registry: Option<&ModelRegistry>,
     ) -> Result<FileInfo, ScanError> {
         // Read file contents
         let contents = fs::read_to_string(path.as_std_path())
@@ -337,8 +362,30 @@ impl FileAnalyzer {
             .map(ch_ts_parser::BumpImportInfo::into_owned)
             .collect();
 
+        // Process each import: detect source and optionally filter by registry
         for import in &mut imports {
-            import.source = detect_model_source_with(&import.path, matcher);
+            // First, detect if this is a shared directory import
+            if let Some(detected_source) = detect_model_source_with(&import.path, matcher) {
+                // If we have a registry, validate that at least one imported name
+                // is a known model export from the detected source
+                if let Some(reg) = registry {
+                    let has_model_export = import.names.iter().any(|name| {
+                        reg.is_export_from(name, detected_source)
+                    });
+
+                    // Only mark as model import if it has actual model exports
+                    import.source = if has_model_export {
+                        Some(detected_source)
+                    } else {
+                        None
+                    };
+                } else {
+                    // No registry - use path-based detection only
+                    import.source = Some(detected_source);
+                }
+            } else {
+                import.source = None;
+            }
         }
 
         let status = determine_status(&imports);

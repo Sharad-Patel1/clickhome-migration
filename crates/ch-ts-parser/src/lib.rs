@@ -164,6 +164,7 @@
 
 pub mod arena;
 pub mod error;
+pub mod exports;
 mod import;
 mod parser;
 pub mod queries;
@@ -179,6 +180,12 @@ pub use arena::{ArenaStr, BumpImportBuilder, BumpImportInfo, StringInterner};
 
 // Re-export import extraction functions
 pub use import::{extract_imports, extract_imports_arena};
+
+// Re-export export extraction functions and types
+pub use exports::{
+    extract_exports, extract_exports_arena, get_tsx_export_query, get_typescript_export_query,
+    kebab_to_pascal, pascal_to_kebab, BumpExportInfo, ExportInfo,
+};
 
 // Re-export tree-sitter types that appear in our public API
 pub use tree_sitter::InputEdit;

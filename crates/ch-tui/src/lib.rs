@@ -233,9 +233,10 @@ async fn run_event_loop(
 
                     // Start watcher after scan completes
                     if is_complete && config.watch.enabled && watcher.is_none() {
-                        info!(path = %config.scan.root_path, "Starting file watcher after scan");
+                        // Watch app_path only (not root_path) to match scan scope
+                        info!(app_path = %config.scan.app_path, "Starting file watcher after scan");
                         match FileWatcher::new(
-                            &config.scan.root_path,
+                            &config.scan.app_path,
                             &config.watch,
                             TypeScriptFilter::default(),
                         )

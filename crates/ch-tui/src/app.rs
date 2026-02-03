@@ -1003,7 +1003,8 @@ impl App {
     }
 
     fn rebuild_scanner(&mut self) -> Result<(), TuiError> {
-        let scanner_config = ScannerConfig::new(&self.config.scan.root_path)
+        // Use app_path for scanning to restrict to application code only
+        let scanner_config = ScannerConfig::new(&self.config.scan.app_path)
             .with_skip_dirs(&["node_modules", "dist", ".git"]);
         let matcher = ModelPathMatcher::from_scan_config(&self.config.scan);
         self.scanner = Scanner::new_with_matcher(scanner_config, matcher)?;

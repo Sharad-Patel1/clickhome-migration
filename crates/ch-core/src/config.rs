@@ -54,6 +54,13 @@ pub struct ScanConfig {
     /// Absolute path to the new `shared_2023` directory.
     pub shared_2023_path: Utf8PathBuf,
 
+    /// Path to the app directory to scan for model consumers.
+    ///
+    /// This restricts scanning to only the application code directory,
+    /// excluding the shared model definition directories. If empty,
+    /// defaults to `root_path` joined with "app" at runtime.
+    pub app_path: Utf8PathBuf,
+
     /// Name of the legacy shared directory (typically "shared").
     pub shared_dir: String,
 
@@ -83,6 +90,7 @@ impl Default for ScanConfig {
             root_path: Utf8PathBuf::new(),
             shared_path: Utf8PathBuf::new(),
             shared_2023_path: Utf8PathBuf::new(),
+            app_path: Utf8PathBuf::new(),
             shared_dir: "shared".to_owned(),
             shared_2023_dir: "shared_2023".to_owned(),
             models_subdir: "models".to_owned(),
@@ -255,6 +263,7 @@ mod tests {
         let config = ScanConfig::default();
         assert!(config.shared_path.as_str().is_empty());
         assert!(config.shared_2023_path.as_str().is_empty());
+        assert!(config.app_path.as_str().is_empty());
         assert_eq!(config.shared_dir, "shared");
         assert_eq!(config.shared_2023_dir, "shared_2023");
         assert_eq!(config.models_subdir, "models");

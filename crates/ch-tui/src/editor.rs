@@ -146,8 +146,12 @@ pub fn run_editor(
     let editor_result = (|| {
         let mut command = toolchain::command(&editor.program, root);
         command.args(&editor.args);
-        if matches!(editor.kind, EditorKind::Cursor | EditorKind::VsCode) && location.is_some() {
-            command.arg("--goto");
+        if matches!(editor.kind, EditorKind::Cursor | EditorKind::VsCode) {
+            // Reuse the existing window to open in the correct workspace
+            command.arg("--reuse-window");
+            if location.is_some() {
+                command.arg("--goto");
+            }
         }
         command.args(location_args(editor.kind, absolute_path.as_path(), location));
 

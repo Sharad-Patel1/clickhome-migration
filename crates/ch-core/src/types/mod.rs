@@ -35,5 +35,7 @@ mod status;
 pub use file::{FileId, FileInfo};
 pub use import::{ImportInfo, ImportKind};
 pub use location::SourceLocation;
-pub use model::{ModelCategory, ModelReference, ModelSource};
+pub use model::{
+    ExportKind, ModelCategory, ModelDefinition, ModelReference, ModelRegistry, ModelSource,
+};
 pub use status::MigrationStatus;

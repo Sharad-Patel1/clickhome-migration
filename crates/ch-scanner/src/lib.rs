@@ -96,19 +96,21 @@
 mod analyzer;
 mod cache;
 mod error;
+mod registry;
 mod stats;
 mod walker;
 
 pub use analyzer::FileAnalyzer;
 pub use cache::ScanCache;
 pub use error::ScanError;
+pub use registry::{RegistryBuildResult, RegistryBuilder};
 pub use stats::{ScanStats, StatsSnapshot};
 pub use walker::FileWalker;
 
 use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileInfo, MigrationStatus};
+use ch_core::{FileInfo, MigrationStatus, ModelRegistry};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -174,6 +176,12 @@ pub struct ScanConfig {
     pub skip_dirs: Vec<String>,
     /// Whether to follow symbolic links.
     pub follow_links: bool,
+    /// Path to the legacy shared directory (for building model registry).
+    pub shared_path: Option<Utf8PathBuf>,
+    /// Path to the modern `shared_2023` directory (for building model registry).
+    pub shared_2023_path: Option<Utf8PathBuf>,
+    /// Whether to build the model registry for import filtering.
+    pub use_registry: bool,
 }
 
 impl ScanConfig {
@@ -197,6 +205,9 @@ impl ScanConfig {
             root: root.to_owned(),
             skip_dirs: Vec::new(),
             follow_links: false,
+            shared_path: None,
+            shared_2023_path: None,
+            use_registry: false,
         }
     }
 
@@ -221,6 +232,33 @@ impl ScanConfig {
         self.follow_links = follow;
         self
     }
+
+    /// Configures the paths to the shared directories for building the model registry.
+    ///
+    /// When set, the scanner will build a model registry and use it to filter
+    /// imports, ensuring only actual model exports are tracked.
+    ///
+    /// # Arguments
+    ///
+    /// * `shared` - Path to the legacy `shared/` directory
+    /// * `shared_2023` - Path to the modern `shared_2023/` directory
+    #[must_use]
+    pub fn with_shared_paths(mut self, shared: &Utf8Path, shared_2023: &Utf8Path) -> Self {
+        self.shared_path = Some(shared.to_owned());
+        self.shared_2023_path = Some(shared_2023.to_owned());
+        self.use_registry = true;
+        self
+    }
+
+    /// Enables or disables registry-based import filtering.
+    ///
+    /// When enabled (and shared paths are set), imports are validated against
+    /// the model registry to ensure only actual model exports are tracked.
+    #[must_use]
+    pub const fn with_registry(mut self, use_registry: bool) -> Self {
+        self.use_registry = use_registry;
+        self
+    }
 }
 
 /// Result of a scan operation.
@@ -239,10 +277,16 @@ pub struct ScanResult {
 /// Combines file walking, parallel analysis, caching, and statistics
 /// into a single interface.
 ///
+/// # Registry-Based Filtering
+///
+/// When configured with shared directory paths, the scanner builds a
+/// [`ModelRegistry`] during initialization. This registry is used to
+/// filter imports, ensuring only actual model exports are tracked.
+///
 /// # Cloning
 ///
 /// `Scanner` is cheaply cloneable via internal `Arc` references.
-/// Clones share the same cache and statistics, enabling use from
+/// Clones share the same cache, statistics, and registry, enabling use from
 /// background tasks while the main thread accesses results.
 ///
 /// # Examples
@@ -251,7 +295,11 @@ pub struct ScanResult {
 /// use ch_scanner::{Scanner, ScanConfig};
 /// use camino::Utf8Path;
 ///
-/// let config = ScanConfig::new(Utf8Path::new("./src"));
+/// let config = ScanConfig::new(Utf8Path::new("./src"))
+///     .with_shared_paths(
+///         Utf8Path::new("./src/shared"),
+///         Utf8Path::new("./src/shared_2023"),
+///     );
 /// let scanner = Scanner::new(config)?;
 ///
 /// // Initial scan
@@ -261,6 +309,10 @@ pub struct ScanResult {
 /// for file in scanner.files_with_status(MigrationStatus::Legacy) {
 ///     println!("{}", file.path);
 /// }
+///
+/// // Access the registry for model information
+/// let registry = scanner.registry();
+/// println!("Legacy models: {}", registry.legacy_model_count());
 /// ```
 #[derive(Debug, Clone)]
 pub struct Scanner {
@@ -268,6 +320,8 @@ pub struct Scanner {
     config: ScanConfig,
     /// Model path matcher for import detection.
     model_path_matcher: ModelPathMatcher,
+    /// Model registry for filtering imports (shared via Arc for cloning).
+    registry: Arc<ModelRegistry>,
     /// File analysis results cache (shared via Arc for cloning).
     cache: Arc<ScanCache>,
     /// Statistics counters (shared via Arc for cloning).
@@ -277,6 +331,9 @@ pub struct Scanner {
 impl Scanner {
     /// Creates a new scanner with the given configuration.
     ///
+    /// If shared directory paths are configured and registry is enabled,
+    /// this will build the model registry during initialization.
+    ///
     /// # Arguments
     ///
     /// * `config` - The scanner configuration
@@ -285,6 +342,8 @@ impl Scanner {
     ///
     /// Returns [`ScanError::Config`] if the configuration is invalid
     /// (e.g., root directory doesn't exist).
+    ///
+    /// Returns [`ScanError::Registry`] if registry building fails (when enabled).
     ///
     /// # Examples
     ///
@@ -310,6 +369,8 @@ impl Scanner {
     ///
     /// Returns [`ScanError::Config`] if the configuration is invalid
     /// (e.g., root directory doesn't exist).
+    ///
+    /// Returns [`ScanError::Registry`] if registry building fails (when enabled).
     pub fn new_with_matcher(
         config: ScanConfig,
         matcher: ModelPathMatcher,
@@ -329,11 +390,88 @@ impl Scanner {
             )));
         }
 
-        info!(root = %config.root, "Creating scanner");
+        // Build model registry if configured
+        let registry = if config.use_registry {
+            if let (Some(shared), Some(shared_2023)) =
+                (&config.shared_path, &config.shared_2023_path)
+            {
+                info!(
+                    shared = %shared,
+                    shared_2023 = %shared_2023,
+                    "Building model registry"
+                );
+                let builder = RegistryBuilder::new(shared, shared_2023);
+                builder.build()?
+            } else {
+                warn!("Registry enabled but shared paths not configured, using empty registry");
+                ModelRegistry::new()
+            }
+        } else {
+            ModelRegistry::new()
+        };
+
+        info!(
+            root = %config.root,
+            use_registry = config.use_registry,
+            legacy_models = registry.legacy_model_count(),
+            modern_models = registry.modern_model_count(),
+            "Creating scanner"
+        );
 
         Ok(Self {
             config,
             model_path_matcher: matcher,
+            registry: Arc::new(registry),
+            cache: Arc::new(ScanCache::new()),
+            stats: Arc::new(ScanStats::new()),
+        })
+    }
+
+    /// Creates a new scanner with a pre-built registry.
+    ///
+    /// Use this when you want to share a registry across multiple scanners
+    /// or when you've built the registry separately.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The scanner configuration
+    /// * `matcher` - Model path matcher for import detection
+    /// * `registry` - Pre-built model registry
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScanError::Config`] if the configuration is invalid.
+    pub fn new_with_registry(
+        config: ScanConfig,
+        matcher: ModelPathMatcher,
+        registry: Arc<ModelRegistry>,
+    ) -> Result<Self, ScanError> {
+        // Validate configuration
+        if !config.root.exists() {
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
+        }
+
+        if !config.root.is_dir() {
+            return Err(ScanError::config(format!(
+                "root path is not a directory: {}",
+                config.root
+            )));
+        }
+
+        info!(
+            root = %config.root,
+            legacy_models = registry.legacy_model_count(),
+            modern_models = registry.modern_model_count(),
+            "Creating scanner with pre-built registry"
+        );
+
+        Ok(Self {
+            config,
+            model_path_matcher: matcher,
+            registry,
             cache: Arc::new(ScanCache::new()),
             stats: Arc::new(ScanStats::new()),
         })
@@ -344,8 +482,9 @@ impl Scanner {
     /// This method:
     /// 1. Walks the directory tree to collect TypeScript file paths
     /// 2. Analyzes files in parallel using rayon
-    /// 3. Updates the cache with results
-    /// 4. Updates statistics counters
+    /// 3. Filters imports against the registry (if enabled)
+    /// 4. Updates the cache with results
+    /// 5. Updates statistics counters
     ///
     /// # Returns
     ///
@@ -374,9 +513,16 @@ impl Scanner {
 
         info!(count = paths.len(), "Collected TypeScript files");
 
+        // Determine registry reference for filtering
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
+
         // Analyze files in parallel
         let analyzer = FileAnalyzer::new();
-        let results = analyzer.analyze_files(&paths, &self.model_path_matcher);
+        let results = analyzer.analyze_files(&paths, &self.model_path_matcher, registry_ref);
 
         // Process results
         let mut errors = Vec::new();
@@ -485,11 +631,19 @@ impl Scanner {
             return Ok(());
         }
 
+        // Determine registry reference for filtering
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
+
         // Analyze files in parallel, streaming results
         let analyzer = FileAnalyzer::new();
         let errors = analyzer.analyze_files_streaming(
             &paths,
             &self.model_path_matcher,
+            registry_ref,
             &tx,
             &self.cache,
             &self.stats,
@@ -539,8 +693,15 @@ impl Scanner {
     pub fn rescan_files(&self, paths: &[Utf8PathBuf]) -> Vec<(Utf8PathBuf, Result<(), ScanError>)> {
         debug!(count = paths.len(), "Re-scanning files");
 
+        // Determine registry reference for filtering
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
+
         let analyzer = FileAnalyzer::new();
-        let results = analyzer.analyze_files(paths, &self.model_path_matcher);
+        let results = analyzer.analyze_files(paths, &self.model_path_matcher, registry_ref);
 
         results
             .into_iter()
@@ -655,6 +816,34 @@ impl Scanner {
         &self.config
     }
 
+    /// Returns a reference to the model registry.
+    ///
+    /// The registry contains all known model exports from the shared directories.
+    /// Use this for model lookup or to display registry statistics in the TUI.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let registry = scanner.registry();
+    /// println!("Legacy models: {}", registry.legacy_model_count());
+    /// println!("Modern models: {}", registry.modern_model_count());
+    ///
+    /// // Check if a name is a known model export
+    /// if registry.is_legacy_export("ActiveContractCodeGen") {
+    ///     println!("Found legacy model export");
+    /// }
+    /// ```
+    #[must_use]
+    pub fn registry(&self) -> &ModelRegistry {
+        &self.registry
+    }
+
+    /// Returns a clone of the Arc-wrapped registry for sharing across threads.
+    #[must_use]
+    pub fn registry_arc(&self) -> Arc<ModelRegistry> {
+        Arc::clone(&self.registry)
+    }
+
     /// Builds a file walker with the current configuration.
     fn build_walker(&self) -> Result<FileWalker, ScanError> {
         let mut walker = FileWalker::new(&self.config.root)?;
@@ -680,6 +869,9 @@ mod tests {
         assert_eq!(config.root.as_str(), "./src");
         assert!(config.skip_dirs.is_empty());
         assert!(!config.follow_links);
+        assert!(!config.use_registry);
+        assert!(config.shared_path.is_none());
+        assert!(config.shared_2023_path.is_none());
     }
 
     #[test]
@@ -695,6 +887,33 @@ mod tests {
     fn test_scan_config_with_follow_links() {
         let config = ScanConfig::new(Utf8Path::new("./src")).with_follow_links(true);
         assert!(config.follow_links);
+    }
+
+    #[test]
+    fn test_scan_config_with_shared_paths() {
+        let config = ScanConfig::new(Utf8Path::new("./src")).with_shared_paths(
+            Utf8Path::new("./src/shared"),
+            Utf8Path::new("./src/shared_2023"),
+        );
+
+        assert!(config.use_registry);
+        assert_eq!(
+            config.shared_path,
+            Some(Utf8PathBuf::from("./src/shared"))
+        );
+        assert_eq!(
+            config.shared_2023_path,
+            Some(Utf8PathBuf::from("./src/shared_2023"))
+        );
+    }
+
+    #[test]
+    fn test_scan_config_with_registry() {
+        let config = ScanConfig::new(Utf8Path::new("./src")).with_registry(true);
+        assert!(config.use_registry);
+
+        let config = ScanConfig::new(Utf8Path::new("./src")).with_registry(false);
+        assert!(!config.use_registry);
     }
 
     #[test]

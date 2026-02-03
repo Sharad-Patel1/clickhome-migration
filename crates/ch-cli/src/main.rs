@@ -59,6 +59,13 @@ struct Cli {
     #[arg(long, global = true, env = "CH_MIGRATE_SHARED_2023_PATH")]
     shared_2023_path: Option<Utf8PathBuf>,
 
+    /// Path to app directory to scan for model consumers.
+    ///
+    /// Defaults to `<path>/app` if not specified. This restricts scanning
+    /// to only the application code directory, excluding shared model definitions.
+    #[arg(long, global = true, env = "CH_MIGRATE_APP_PATH")]
+    app_path: Option<Utf8PathBuf>,
+
     /// Enable verbose logging (debug level).
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -179,6 +186,12 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
         .clone()
         .unwrap_or_else(|| config.scan.root_path.join(&config.scan.shared_2023_dir));
 
+    // Set app_path: use CLI arg or default to root_path/app
+    config.scan.app_path = cli
+        .app_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join("app"));
+
     if let Some(name) = config.scan.shared_path.file_name() {
         config.scan.shared_dir = name.to_owned();
     }
@@ -193,6 +206,8 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
         "shared_2023",
         require_shared_paths,
     )?;
+    // app_path is always required since we scan it for model consumers
+    validate_dir(&config.scan.app_path, "app", true)?;
 
     Ok(config)
 }
@@ -227,11 +242,15 @@ fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::
 
 /// Creates a [`Scanner`] from the configuration.
 ///
+/// Uses `app_path` as the scan root to restrict scanning to only application
+/// code, excluding shared model definition directories.
+///
 /// # Errors
 ///
 /// Returns an error if the scanner cannot be created.
 fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
-    let scanner_config = ScannerConfig::new(&config.scan.root_path)
+    // Use app_path for scanning (not root_path) to restrict to application code only
+    let scanner_config = ScannerConfig::new(&config.scan.app_path)
         .with_skip_dirs(&["node_modules", "dist", ".git"]);
     let matcher = ModelPathMatcher::from_scan_config(&config.scan);
 
@@ -254,7 +273,7 @@ fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
 ///
 /// Returns an error if scanning fails.
 fn run_scan(config: &Config, detailed: bool) -> color_eyre::Result<()> {
-    info!(path = %config.scan.root_path, "Starting scan");
+    info!(app_path = %config.scan.app_path, "Starting scan");
 
     let scanner = create_scanner(config)?;
     let result = scanner.scan()?;
@@ -290,7 +309,7 @@ fn run_scan(config: &Config, detailed: bool) -> color_eyre::Result<()> {
 ///
 /// Returns an error if the TUI fails.
 async fn run_watch(config: Config, no_watch: bool) -> color_eyre::Result<()> {
-    info!(path = %config.scan.root_path, watch = !no_watch, "Starting TUI");
+    info!(app_path = %config.scan.app_path, watch = !no_watch, "Starting TUI");
 
     let scanner = create_scanner(&config)?;
 
@@ -340,7 +359,7 @@ fn run_report(
     format: ReportFormat,
     output: Option<Utf8PathBuf>,
 ) -> color_eyre::Result<()> {
-    info!(path = %config.scan.root_path, "Generating report");
+    info!(app_path = %config.scan.app_path, "Generating report");
 
     let scanner = create_scanner(config)?;
     let result = scanner.scan()?;

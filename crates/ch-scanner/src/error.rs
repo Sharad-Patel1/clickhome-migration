@@ -10,7 +10,7 @@ use camino::Utf8PathBuf;
 /// Errors that can occur during scanning operations.
 ///
 /// These errors cover directory traversal failures, file I/O errors,
-/// parsing errors, and configuration issues.
+/// parsing errors, registry building, and configuration issues.
 ///
 /// # Cloning
 ///
@@ -23,6 +23,7 @@ use camino::Utf8PathBuf;
 /// - **Walker errors** ([`ScanError::Walk`]): Fatal - propagate immediately
 /// - **File read errors** ([`ScanError::Read`]): Log warning, skip file, continue scan
 /// - **Parse errors** ([`ScanError::Parse`]): Log warning, skip file, continue scan
+/// - **Registry errors** ([`ScanError::Registry`]): Fatal - cannot proceed without registry
 ///
 /// # Examples
 ///
@@ -37,6 +38,7 @@ use camino::Utf8PathBuf;
 ///         ScanError::Parse { path, .. } => eprintln!("Parse error: {path}"),
 ///         ScanError::Config(msg) => eprintln!("Config error: {msg}"),
 ///         ScanError::NonUtf8Path(p) => eprintln!("Invalid path: {}", p.display()),
+///         ScanError::Registry(msg) => eprintln!("Registry error: {msg}"),
 ///     }
 /// }
 /// ```
@@ -90,6 +92,13 @@ pub enum ScanError {
     /// encountered, it cannot be processed.
     #[error("path is not valid UTF-8: {}", _0.display())]
     NonUtf8Path(std::path::PathBuf),
+
+    /// Failed to build or access the model registry.
+    ///
+    /// This is typically a fatal error that prevents import filtering
+    /// from working correctly.
+    #[error("model registry error: {0}")]
+    Registry(String),
 }
 
 impl From<ignore::Error> for ScanError {
@@ -125,6 +134,12 @@ impl ScanError {
         Self::Config(message.into())
     }
 
+    /// Creates a new [`ScanError::Registry`] error.
+    #[inline]
+    pub fn registry(message: impl Into<String>) -> Self {
+        Self::Registry(message.into())
+    }
+
     /// Returns `true` if this error is recoverable (scanning can continue).
     ///
     /// Recoverable errors are file-specific issues that don't prevent
@@ -147,7 +162,7 @@ impl ScanError {
     pub fn path(&self) -> Option<&Utf8PathBuf> {
         match self {
             Self::Read { path, .. } | Self::Parse { path, .. } => Some(path),
-            Self::Walk { .. } | Self::Config(_) | Self::NonUtf8Path(_) => None,
+            Self::Walk { .. } | Self::Config(_) | Self::NonUtf8Path(_) | Self::Registry(_) => None,
         }
     }
 }
@@ -182,6 +197,15 @@ mod tests {
         assert!(err.is_fatal());
         assert!(err.path().is_none());
         assert!(err.to_string().contains("invalid root path"));
+    }
+
+    #[test]
+    fn test_scan_error_registry() {
+        let err = ScanError::registry("failed to build registry");
+        assert!(!err.is_recoverable());
+        assert!(err.is_fatal());
+        assert!(err.path().is_none());
+        assert!(err.to_string().contains("failed to build registry"));
     }
 
     #[test]
