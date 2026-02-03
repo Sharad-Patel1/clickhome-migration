@@ -513,6 +513,7 @@ mod tests {
         let path = Utf8Path::from_path(temp_dir.path()).expect("Invalid path");
 
         let config = WatchConfig {
+            enabled: true,
             debounce_ms: 50, // Shorter debounce for faster tests
             recursive: true,
         };
