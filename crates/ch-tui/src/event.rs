@@ -9,6 +9,7 @@
 //!
 //! - **Terminal**: Key presses, mouse events, window resizing
 //! - **File Watcher**: File change notifications from `ch-watcher`
+//! - **Scanner**: Streaming scan results from `ch-scanner`
 //! - **Timer**: Periodic tick events for animations and updates
 //!
 //! # Example
@@ -20,12 +21,14 @@
 //!     match tui.next_event().await {
 //!         Some(Event::Key(key)) => handle_key(key),
 //!         Some(Event::FileChanged(event)) => handle_file_change(event),
+//!         Some(Event::ScanUpdate(update)) => handle_scan_update(update),
 //!         Some(Event::Tick) => update_animations(),
 //!         None => break,
 //!     }
 //! }
 //! ```
 
+use ch_scanner::ScanUpdate;
 use ch_watcher::FileEvent;
 use crossterm::event::{KeyEvent, MouseEvent};
 
@@ -52,6 +55,12 @@ pub enum Event {
 
     /// A file changed in the watched directory.
     FileChanged(FileEvent),
+
+    /// Scan progress update from background task.
+    ///
+    /// These events are streamed from the background scanner and include
+    /// file discovery counts, individual file results, and completion status.
+    ScanUpdate(ScanUpdate),
 
     /// Periodic tick for animations and updates.
     ///
@@ -84,6 +93,13 @@ impl Event {
     #[must_use]
     pub const fn is_file_changed(&self) -> bool {
         matches!(self, Self::FileChanged(_))
+    }
+
+    /// Returns `true` if this is a scan update event.
+    #[inline]
+    #[must_use]
+    pub const fn is_scan_update(&self) -> bool {
+        matches!(self, Self::ScanUpdate(_))
     }
 
     /// Returns `true` if this is a tick event.

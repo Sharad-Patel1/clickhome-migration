@@ -51,11 +51,11 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
         .split(area);
 
     // Render header
-    let header = HeaderBar::new(&app.config, app.file_count());
+    let header = HeaderBar::new(&app.config, app.file_count(), &app.scan_state);
     frame.render_widget(&header, main_chunks[0]);
 
     // Render stats panel
-    let stats_panel = StatsPanel::new(&app.stats, theme);
+    let stats_panel = StatsPanel::new(&app.stats, &app.scan_state, theme);
     frame.render_widget(&stats_panel, main_chunks[1]);
 
     // Render main content (file list + details)

@@ -58,13 +58,16 @@ pub mod tui;
 pub mod ui;
 
 use ch_core::Config;
-use ch_scanner::Scanner;
+use ch_scanner::{ScanUpdate, Scanner};
 use ch_watcher::{FileWatcher, TypeScriptFilter};
+use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
 // Public re-exports
 pub use action::Action;
-pub use app::{App, AppMode, DetailPaneState, FileListState, FilterState, Focus, StatusMessage};
+pub use app::{
+    App, AppMode, DetailPaneState, FileListState, FilterState, Focus, ScanState, StatusMessage,
+};
 pub use error::TuiError;
 pub use event::Event;
 pub use theme::Theme;
@@ -119,46 +122,28 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
     // Initialize app
     let mut app = App::new(config.clone(), scanner);
 
-    let mut watcher = if app.needs_directory_setup() {
-        debug!("Directory setup required; delaying initial scan and watcher");
-        None
-    } else {
-        // Perform initial scan
-        info!("Starting initial scan");
-        app.initial_scan()?;
-
-        // Start file watcher if enabled
-        if config.watch.enabled {
-            info!(path = %config.scan.root_path, "Starting file watcher");
-            match FileWatcher::new(
-                &config.scan.root_path,
-                &config.watch,
-                TypeScriptFilter::default(),
-            )
-            .await
-            {
-                Ok(w) => Some(w),
-                Err(e) => {
-                    error!(error = %e, "Failed to start file watcher");
-                    app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
-                    None
-                }
-            }
-        } else {
-            debug!("File watcher disabled");
-            None
-        }
-    };
-
-    // Enter terminal
-    tui.enter()?;
-
     // Get theme from config
     let theme = Theme::from_scheme(config.tui.color_scheme);
 
+    // CHANGED: Enter terminal FIRST for instant feedback
+    tui.enter()?;
+
+    // Spawn background scan if not in setup mode
+    let scan_rx = if app.needs_directory_setup() {
+        debug!("Directory setup required; delaying initial scan and watcher");
+        None
+    } else {
+        // Spawn streaming scan in background for instant UI
+        info!("Starting background streaming scan");
+        Some(spawn_background_scan(&app.scanner))
+    };
+
+    // Start watcher AFTER scan complete (handled in event loop)
+    let mut watcher: Option<FileWatcher> = None;
+
     // Main event loop
     info!("Entering main event loop");
-    let result = run_event_loop(&mut tui, &mut app, &mut watcher, &theme).await;
+    let result = run_event_loop(&mut tui, &mut app, &mut watcher, scan_rx, &config, &theme).await;
 
     // Exit terminal (restore state)
     tui.exit()?;
@@ -174,14 +159,35 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
     result
 }
 
+/// Spawns a background streaming scan task.
+///
+/// Returns a receiver for scan updates that can be polled in the event loop.
+fn spawn_background_scan(scanner: &Scanner) -> mpsc::Receiver<ScanUpdate> {
+    let (tx, rx) = mpsc::channel(256); // Buffer for smooth streaming
+    let scanner_clone = scanner.clone();
+
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = scanner_clone.scan_streaming(tx) {
+            error!(error = %e, "Background scan failed");
+        }
+    });
+
+    rx
+}
+
 /// Runs the main event loop.
 async fn run_event_loop(
     tui: &mut Tui,
     app: &mut App,
     watcher: &mut Option<FileWatcher>,
+    mut scan_rx: Option<mpsc::Receiver<ScanUpdate>>,
+    config: &Config,
     theme: &Theme,
 ) -> Result<(), TuiError> {
     loop {
+        // Sort files if dirty before rendering (deferred sorting)
+        app.sort_files_if_needed();
+
         // Draw the UI
         tui.draw(|frame| ui::render(app, frame, theme))?;
 
@@ -198,6 +204,16 @@ async fn run_event_loop(
                 }
             } => {
                 file_event.map(Event::FileChanged)
+            },
+
+            // Scan update events
+            scan_update = async {
+                match &mut scan_rx {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                scan_update.map(Event::ScanUpdate)
             }
         };
 
@@ -211,6 +227,31 @@ async fn run_event_loop(
                     Action::Render
                 }
                 Event::FileChanged(file_event) => app.handle_file_change(file_event),
+                Event::ScanUpdate(update) => {
+                    let is_complete = matches!(update, ScanUpdate::Complete(_));
+                    app.handle_scan_update(update);
+
+                    // Start watcher after scan completes
+                    if is_complete && config.watch.enabled && watcher.is_none() {
+                        info!(path = %config.scan.root_path, "Starting file watcher after scan");
+                        match FileWatcher::new(
+                            &config.scan.root_path,
+                            &config.watch,
+                            TypeScriptFilter::default(),
+                        )
+                        .await
+                        {
+                            Ok(w) => *watcher = Some(w),
+                            Err(e) => {
+                                error!(error = %e, "Failed to start file watcher");
+                                app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
+                            }
+                        }
+                        // Clear the scan receiver since scan is done
+                        scan_rx = None;
+                    }
+                    Action::Render
+                }
                 Event::Tick => {
                     app.tick();
                     Action::None

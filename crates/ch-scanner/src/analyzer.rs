@@ -46,11 +46,16 @@ use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelSource};
 use ch_ts_parser::{detect_model_source_with, ArenaParser, ModelPathMatcher};
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use smallvec::SmallVec;
+use tokio::sync::mpsc;
 
+use crate::cache::ScanCache;
 use crate::error::ScanError;
+use crate::stats::ScanStats;
+use crate::ScanUpdate;
 
 /// Parallel file analyzer using rayon and per-thread arenas.
 ///
@@ -148,6 +153,103 @@ impl FileAnalyzer {
                 },
             )
             .collect()
+    }
+
+    /// Analyzes files in parallel, streaming results via channel.
+    ///
+    /// Unlike [`analyze_files`](Self::analyze_files), this method sends each
+    /// result immediately via the channel rather than collecting them.
+    /// This enables live UI updates during the scan.
+    ///
+    /// # Arguments
+    ///
+    /// * `paths` - Slice of file paths to analyze
+    /// * `matcher` - Model path matcher for import detection
+    /// * `tx` - Channel sender for streaming updates
+    /// * `cache` - Cache to populate with successful results
+    /// * `stats` - Statistics to update atomically
+    ///
+    /// # Returns
+    ///
+    /// A vector of errors encountered during scanning. Successful results
+    /// are sent via the channel and inserted into the cache.
+    ///
+    /// # Cancellation
+    ///
+    /// If the channel receiver is dropped, `blocking_send` will fail and
+    /// the remaining work will complete without sending updates.
+    #[must_use]
+    pub fn analyze_files_streaming(
+        &self,
+        paths: &[Utf8PathBuf],
+        matcher: &ModelPathMatcher,
+        tx: &mpsc::Sender<ScanUpdate>,
+        cache: &ScanCache,
+        stats: &ScanStats,
+    ) -> Vec<(Utf8PathBuf, ScanError)> {
+        // Create a Herd for per-thread arenas
+        let herd = Herd::new();
+        // Collect errors using mutex (errors are rare, so contention is minimal)
+        let errors: Mutex<Vec<(Utf8PathBuf, ScanError)>> = Mutex::new(Vec::new());
+
+        paths
+            .par_iter()
+            .for_each_init(
+                // Per-thread initialization: create parser + get arena member
+                || {
+                    let ts_parser = ArenaParser::new().ok();
+                    let tsx_parser = ArenaParser::new_tsx().ok();
+                    let member = herd.get();
+                    (ts_parser, tsx_parser, member, tx.clone())
+                },
+                // Process each file
+                |(ts_parser, tsx_parser, member, sender), path| {
+                    stats.increment_total();
+
+                    let result = self.analyze_file_inner(
+                        path,
+                        ts_parser.as_mut(),
+                        tsx_parser.as_mut(),
+                        member.as_bump(),
+                        matcher,
+                    );
+
+                    match result {
+                        Ok(file_info) => {
+                            // Update statistics based on status
+                            match file_info.status {
+                                MigrationStatus::Legacy => stats.increment_legacy(),
+                                MigrationStatus::Migrated => stats.increment_migrated(),
+                                MigrationStatus::Partial => stats.increment_partial(),
+                                MigrationStatus::NoModels => stats.increment_no_models(),
+                                _ => {} // Handle any future status variants
+                            }
+
+                            // Insert into cache
+                            cache.insert(file_info.clone());
+
+                            // Send update (ignore if receiver dropped)
+                            // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
+                            let _ = sender.blocking_send(ScanUpdate::FileScanned(Box::new(file_info)));
+                        }
+                        Err(e) => {
+                            stats.increment_errors();
+
+                            // Collect error
+                            errors.lock().push((path.clone(), e.clone()));
+
+                            // Send error update (ignore if receiver dropped)
+                            let _ = sender.blocking_send(ScanUpdate::FileError {
+                                path: path.clone(),
+                                error: e,
+                            });
+                        }
+                    }
+                },
+            );
+
+        // Return collected errors
+        errors.into_inner()
     }
 
     /// Analyzes a single file.

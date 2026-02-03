@@ -19,6 +19,9 @@ ignore.workspace = true
 # Parallel processing
 rayon.workspace = true
 
+# Async (for streaming channel)
+tokio.workspace = true
+
 # Concurrent caching
 parking_lot.workspace = true
 

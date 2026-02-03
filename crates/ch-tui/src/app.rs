@@ -10,6 +10,7 @@
 //! App
 //!  ├── scanner: Scanner          # File analysis results
 //!  ├── watcher: FileWatcher      # Live file change detection
+//!  ├── scan_state: ScanState     # Background scan progress
 //!  ├── mode: AppMode             # Current UI mode
 //!  ├── focus: Focus              # Active panel
 //!  ├── file_list_state: FileListState
@@ -22,7 +23,7 @@ use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
-use ch_scanner::{ScanConfig as ScannerConfig, ScanResult, Scanner, StatsSnapshot};
+use ch_scanner::{ScanConfig as ScannerConfig, ScanResult, ScanUpdate, Scanner, StatsSnapshot};
 use ch_ts_parser::ModelPathMatcher;
 use ch_watcher::FileEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
@@ -47,6 +48,50 @@ pub enum AppMode {
 
     /// Directory setup overlay is displayed.
     DirectorySetup,
+}
+
+/// Current state of the background scan.
+///
+/// Tracks progress during streaming scans, enabling live UI updates
+/// with progress indicators and file counts.
+#[derive(Debug, Clone, Default)]
+pub enum ScanState {
+    /// No scan in progress.
+    #[default]
+    Idle,
+
+    /// Scan is actively running.
+    Scanning {
+        /// Total files discovered (from `PathsDiscovered` event).
+        discovered: usize,
+        /// Files analyzed so far.
+        scanned: usize,
+    },
+
+    /// Scan has completed.
+    Complete,
+}
+
+impl ScanState {
+    /// Returns `true` if a scan is currently in progress.
+    #[must_use]
+    pub const fn is_scanning(&self) -> bool {
+        matches!(self, Self::Scanning { .. })
+    }
+
+    /// Returns the progress as a percentage (0.0-100.0).
+    ///
+    /// Returns `None` if not scanning or no files discovered yet.
+    #[must_use]
+    pub fn progress_percent(&self) -> Option<f64> {
+        match self {
+            Self::Scanning { discovered, scanned } if *discovered > 0 => {
+                #[allow(clippy::cast_precision_loss)]
+                Some((*scanned as f64 / *discovered as f64) * 100.0)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Which panel has focus.
@@ -462,6 +507,15 @@ pub struct App {
 
     /// Terminal size (updated on resize).
     pub terminal_size: Rect,
+
+    /// Current state of the background scan.
+    pub scan_state: ScanState,
+
+    /// Flag indicating files vec needs re-sorting.
+    ///
+    /// Set when files are added during streaming scan.
+    /// Cleared after sorting on render.
+    files_dirty: bool,
 }
 
 impl App {
@@ -497,6 +551,8 @@ impl App {
             should_quit: false,
             stats: StatsSnapshot::default(),
             terminal_size: Rect::default(),
+            scan_state: ScanState::Idle,
+            files_dirty: false,
         }
     }
 
@@ -751,7 +807,7 @@ impl App {
                 // Not implemented yet
             }
 
-            Action::Render | Action::Tick | Action::None => {}
+            Action::Render | Action::Tick | Action::None | Action::StartStreamingScan => {}
         }
     }
 
@@ -762,6 +818,122 @@ impl App {
             if status.should_hide() {
                 self.status = None;
             }
+        }
+    }
+
+    /// Handles a scan update from the background streaming scan.
+    ///
+    /// This method processes updates sent via channel during a streaming scan,
+    /// updating the UI state incrementally as files are discovered and analyzed.
+    ///
+    /// # Arguments
+    ///
+    /// * `update` - The scan update to process
+    pub fn handle_scan_update(&mut self, update: ScanUpdate) {
+        match update {
+            ScanUpdate::PathsDiscovered(count) => {
+                info!(count, "Paths discovered");
+                self.scan_state = ScanState::Scanning {
+                    discovered: count,
+                    scanned: 0,
+                };
+                // Pre-allocate storage for efficiency
+                self.files.reserve(count);
+                self.status = Some(StatusMessage::info(format!("Scanning {count} files...")));
+            }
+            ScanUpdate::FileScanned(file_info) => {
+                // Unbox the FileInfo
+                let file_info = *file_info;
+
+                // Update stats incrementally
+                self.update_stats_for_file(&file_info);
+
+                // Add to local files vec
+                self.files.push(file_info);
+                self.files_dirty = true;
+
+                // Update progress counter
+                if let ScanState::Scanning {
+                    discovered,
+                    ref mut scanned,
+                } = self.scan_state
+                {
+                    *scanned += 1;
+                    // Update status message periodically (every 100 files)
+                    if *scanned % 100 == 0 {
+                        self.status = Some(StatusMessage::info(format!(
+                            "Scanning... {scanned}/{discovered} files"
+                        )));
+                    }
+                }
+            }
+            ScanUpdate::FileError { path, error } => {
+                debug!(path = %path, error = %error, "File scan error");
+                self.stats.errors += 1;
+            }
+            ScanUpdate::Complete(result) => {
+                info!(
+                    total = result.stats.total,
+                    legacy = result.stats.legacy,
+                    migrated = result.stats.migrated,
+                    "Scan complete"
+                );
+                self.scan_state = ScanState::Complete;
+                self.stats = result.stats;
+                // Force sort and apply filters
+                self.sort_and_refresh_files();
+                self.status = Some(StatusMessage::info(format!(
+                    "Scanned {} files",
+                    self.stats.total
+                )));
+            }
+        }
+    }
+
+    /// Updates internal stats based on a newly scanned file.
+    fn update_stats_for_file(&mut self, file_info: &FileInfo) {
+        self.stats.total += 1;
+        match file_info.status {
+            MigrationStatus::Legacy => self.stats.legacy += 1,
+            MigrationStatus::Migrated => self.stats.migrated += 1,
+            MigrationStatus::Partial => self.stats.partial += 1,
+            MigrationStatus::NoModels => self.stats.no_models += 1,
+            _ => {} // Handle any future status variants
+        }
+    }
+
+    /// Sorts files if dirty (called before render).
+    ///
+    /// This deferred sorting approach avoids O(n log n) sort per file
+    /// during streaming scans. Instead, files are marked dirty and
+    /// sorted once before each render.
+    pub fn sort_files_if_needed(&mut self) {
+        if self.files_dirty {
+            self.files.sort_by(|a, b| a.path.cmp(&b.path));
+            self.files_dirty = false;
+
+            // Re-apply filter if active
+            if self.filter.is_active() {
+                self.apply_filter();
+            }
+
+            // Ensure selection is valid
+            if self.file_list_state.selected.is_none() && !self.files.is_empty() {
+                self.file_list_state.selected = Some(0);
+            }
+        }
+    }
+
+    /// Sorts files and refreshes the display after a scan completes.
+    fn sort_and_refresh_files(&mut self) {
+        self.files.sort_by(|a, b| a.path.cmp(&b.path));
+        self.files_dirty = false;
+
+        // Re-apply filter if active
+        if self.filter.is_active() {
+            self.apply_filter();
+        } else if self.file_list_state.selected.is_none() && !self.files.is_empty() {
+            self.file_list_state.selected = Some(0);
         }
     }
 

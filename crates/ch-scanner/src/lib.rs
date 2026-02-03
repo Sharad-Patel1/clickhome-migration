@@ -36,6 +36,35 @@
 //! println!("Progress: {:.1}%", stats.progress_percent());
 //! ```
 //!
+//! # Streaming API
+//!
+//! For large codebases, use the streaming API to receive results as they're
+//! processed, enabling live UI updates:
+//!
+//! ```ignore
+//! use ch_scanner::{Scanner, ScanConfig, ScanUpdate};
+//! use tokio::sync::mpsc;
+//!
+//! let (tx, mut rx) = mpsc::channel(256);
+//! let scanner = Scanner::new(ScanConfig::new(Utf8Path::new("./src")))?;
+//!
+//! // Spawn blocking scan in background
+//! let scanner_clone = scanner.clone();
+//! tokio::task::spawn_blocking(move || {
+//!     scanner_clone.scan_streaming(tx).ok();
+//! });
+//!
+//! // Process updates as they arrive
+//! while let Some(update) = rx.recv().await {
+//!     match update {
+//!         ScanUpdate::PathsDiscovered(count) => println!("Found {} files", count),
+//!         ScanUpdate::FileScanned(info) => println!("Scanned: {}", info.path),
+//!         ScanUpdate::FileError { path, .. } => println!("Error: {}", path),
+//!         ScanUpdate::Complete(result) => println!("Done: {} total", result.stats.total),
+//!     }
+//! }
+//! ```
+//!
 //! # Architecture
 //!
 //! ```text
@@ -76,11 +105,55 @@ pub use error::ScanError;
 pub use stats::{ScanStats, StatsSnapshot};
 pub use walker::FileWalker;
 
+use std::sync::Arc;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileInfo, MigrationStatus};
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use ch_ts_parser::ModelPathMatcher;
+
+/// Update sent during a streaming scan operation.
+///
+/// These updates allow the TUI to display progress in real-time as files
+/// are discovered and analyzed, rather than waiting for the entire scan
+/// to complete.
+///
+/// # Size Optimization
+///
+/// The `FileScanned` variant is boxed to reduce enum size, since
+/// `FileInfo` is much larger than other variants. This improves
+/// channel throughput during streaming scans.
+#[derive(Debug)]
+pub enum ScanUpdate {
+    /// Total paths discovered (sent once after directory walk completes).
+    ///
+    /// Use this to pre-allocate storage and show "Scanning N files..."
+    PathsDiscovered(usize),
+
+    /// A single file was successfully analyzed.
+    ///
+    /// Sent immediately after each file is parsed, enabling live updates.
+    /// Boxed to reduce enum size for efficient channel transmission.
+    FileScanned(Box<FileInfo>),
+
+    /// A single file failed to analyze.
+    ///
+    /// Contains the path and error for logging/display purposes.
+    FileError {
+        /// The path of the file that failed.
+        path: Utf8PathBuf,
+        /// The error that occurred.
+        error: ScanError,
+    },
+
+    /// Scan completed with final statistics.
+    ///
+    /// Sent after all files have been processed. The result contains
+    /// the final statistics snapshot and any accumulated errors.
+    Complete(ScanResult),
+}
 
 /// Configuration for the scanner.
 ///
@@ -166,6 +239,12 @@ pub struct ScanResult {
 /// Combines file walking, parallel analysis, caching, and statistics
 /// into a single interface.
 ///
+/// # Cloning
+///
+/// `Scanner` is cheaply cloneable via internal `Arc` references.
+/// Clones share the same cache and statistics, enabling use from
+/// background tasks while the main thread accesses results.
+///
 /// # Examples
 ///
 /// ```ignore
@@ -183,16 +262,16 @@ pub struct ScanResult {
 ///     println!("{}", file.path);
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Scanner {
     /// Scanner configuration.
     config: ScanConfig,
     /// Model path matcher for import detection.
     model_path_matcher: ModelPathMatcher,
-    /// File analysis results cache.
-    cache: ScanCache,
-    /// Statistics counters.
-    stats: ScanStats,
+    /// File analysis results cache (shared via Arc for cloning).
+    cache: Arc<ScanCache>,
+    /// Statistics counters (shared via Arc for cloning).
+    stats: Arc<ScanStats>,
 }
 
 impl Scanner {
@@ -255,8 +334,8 @@ impl Scanner {
         Ok(Self {
             config,
             model_path_matcher: matcher,
-            cache: ScanCache::new(),
-            stats: ScanStats::new(),
+            cache: Arc::new(ScanCache::new()),
+            stats: Arc::new(ScanStats::new()),
         })
     }
 
@@ -338,6 +417,101 @@ impl Scanner {
         );
 
         Ok(ScanResult { stats, errors })
+    }
+
+    /// Performs a streaming scan, sending results via channel.
+    ///
+    /// Unlike [`scan()`](Self::scan), this method streams results as they become
+    /// available, enabling live UI updates during the scan. Each file result is
+    /// sent immediately after analysis completes.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - Channel sender for streaming updates (takes ownership)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on successful completion, or `Err` if the directory
+    /// walk fails. Individual file errors are sent via the channel as
+    /// [`ScanUpdate::FileError`] rather than causing the method to fail.
+    ///
+    /// # Channel Protocol
+    ///
+    /// Updates are sent in this order:
+    /// 1. [`ScanUpdate::PathsDiscovered`] - once, after collecting all paths
+    /// 2. [`ScanUpdate::FileScanned`] or [`ScanUpdate::FileError`] - per file
+    /// 3. [`ScanUpdate::Complete`] - once, after all files processed
+    ///
+    /// # Cancellation
+    ///
+    /// If the receiver is dropped, `blocking_send` will fail and rayon threads
+    /// will exit cleanly. The scan will stop early but the method still returns `Ok`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use ch_scanner::{Scanner, ScanConfig, ScanUpdate};
+    /// use tokio::sync::mpsc;
+    ///
+    /// let (tx, mut rx) = mpsc::channel(256);
+    /// let scanner = Scanner::new(ScanConfig::new(Utf8Path::new("./src")))?;
+    ///
+    /// tokio::task::spawn_blocking(move || {
+    ///     scanner.scan_streaming(tx).ok();
+    /// });
+    ///
+    /// while let Some(update) = rx.recv().await {
+    ///     // Process updates...
+    /// }
+    /// ```
+    #[allow(clippy::needless_pass_by_value)] // Sender is cloned internally for rayon threads
+    pub fn scan_streaming(&self, tx: mpsc::Sender<ScanUpdate>) -> Result<(), ScanError> {
+        info!(root = %self.config.root, "Starting streaming scan");
+
+        // Reset statistics for fresh scan
+        self.stats.reset();
+        self.cache.clear();
+
+        // Walk directory to collect paths
+        let walker = self.build_walker()?;
+        let paths = walker.collect_paths()?;
+        let path_count = paths.len();
+
+        info!(count = path_count, "Collected TypeScript files");
+
+        // Send paths discovered notification
+        if tx.blocking_send(ScanUpdate::PathsDiscovered(path_count)).is_err() {
+            // Receiver dropped, return early
+            return Ok(());
+        }
+
+        // Analyze files in parallel, streaming results
+        let analyzer = FileAnalyzer::new();
+        let errors = analyzer.analyze_files_streaming(
+            &paths,
+            &self.model_path_matcher,
+            &tx,
+            &self.cache,
+            &self.stats,
+        );
+
+        // Build final result
+        let stats = self.stats.snapshot();
+        let result = ScanResult { stats, errors };
+
+        info!(
+            total = result.stats.total,
+            legacy = result.stats.legacy,
+            migrated = result.stats.migrated,
+            partial = result.stats.partial,
+            errors = result.stats.errors,
+            "Streaming scan completed"
+        );
+
+        // Send completion notification (ignore if receiver dropped)
+        let _ = tx.blocking_send(ScanUpdate::Complete(result));
+
+        Ok(())
     }
 
     /// Re-scans specific files.
@@ -471,7 +645,7 @@ impl Scanner {
     /// let all_files = cache.all_files();
     /// ```
     #[must_use]
-    pub const fn cache(&self) -> &ScanCache {
+    pub fn cache(&self) -> &ScanCache {
         &self.cache
     }
 

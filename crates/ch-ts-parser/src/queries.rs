@@ -139,7 +139,7 @@ pub fn get_tsx_import_query() -> Result<&'static Query, ParseError> {
 fn compile_query(language: &Language) -> Result<Query, ParseError> {
     Query::new(language, IMPORT_QUERY).map_err(|e| ParseError::QueryCompile {
         offset: e.offset,
-        kind: e,
+        kind: std::sync::Arc::new(e),
     })
 }
 

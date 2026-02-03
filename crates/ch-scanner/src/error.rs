@@ -3,12 +3,20 @@
 //! This module provides the [`ScanError`] type for errors that can occur
 //! during directory traversal and file analysis.
 
+use std::sync::Arc;
+
 use camino::Utf8PathBuf;
 
 /// Errors that can occur during scanning operations.
 ///
 /// These errors cover directory traversal failures, file I/O errors,
 /// parsing errors, and configuration issues.
+///
+/// # Cloning
+///
+/// `ScanError` implements `Clone` for use in streaming APIs where errors
+/// need to be sent through channels. Non-Clone source errors are wrapped
+/// in `Arc` for efficient cloning.
 ///
 /// # Error Recovery Strategy
 ///
@@ -24,7 +32,7 @@ use camino::Utf8PathBuf;
 ///
 /// fn handle_error(err: ScanError) {
 ///     match err {
-///         ScanError::Walk(e) => eprintln!("Walk error: {e}"),
+///         ScanError::Walk { .. } => eprintln!("Walk error: {err}"),
 ///         ScanError::Read { path, .. } => eprintln!("Read error: {path}"),
 ///         ScanError::Parse { path, .. } => eprintln!("Parse error: {path}"),
 ///         ScanError::Config(msg) => eprintln!("Config error: {msg}"),
@@ -32,38 +40,42 @@ use camino::Utf8PathBuf;
 ///     }
 /// }
 /// ```
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ScanError {
     /// Failed to walk a directory.
     ///
     /// This is typically a fatal error that prevents scanning from continuing.
-    #[error("failed to walk directory: {0}")]
-    Walk(#[from] ignore::Error),
+    #[error("failed to walk directory: {error}")]
+    Walk {
+        /// The underlying walk error (wrapped in Arc for cloning).
+        #[source]
+        error: Arc<ignore::Error>,
+    },
 
     /// Failed to read a file.
     ///
     /// Contains the path that failed and the underlying I/O error.
     /// Scanning can continue by skipping this file.
-    #[error("failed to read file {path}: {source}")]
+    #[error("failed to read file {path}: {error}")]
     Read {
         /// The path of the file that couldn't be read.
         path: Utf8PathBuf,
-        /// The underlying I/O error.
+        /// The underlying I/O error (wrapped in Arc for cloning).
         #[source]
-        source: std::io::Error,
+        error: Arc<std::io::Error>,
     },
 
     /// Failed to parse a TypeScript file.
     ///
     /// Contains the path that failed and the underlying parse error.
     /// Scanning can continue by skipping this file.
-    #[error("failed to parse file {path}: {source}")]
+    #[error("failed to parse file {path}: {error}")]
     Parse {
         /// The path of the file that couldn't be parsed.
         path: Utf8PathBuf,
         /// The underlying parse error.
         #[source]
-        source: ch_ts_parser::ParseError,
+        error: ch_ts_parser::ParseError,
     },
 
     /// Invalid scanner configuration.
@@ -80,13 +92,21 @@ pub enum ScanError {
     NonUtf8Path(std::path::PathBuf),
 }
 
+impl From<ignore::Error> for ScanError {
+    fn from(error: ignore::Error) -> Self {
+        Self::Walk {
+            error: Arc::new(error),
+        }
+    }
+}
+
 impl ScanError {
     /// Creates a new [`ScanError::Read`] error.
     #[inline]
     pub fn read(path: impl Into<Utf8PathBuf>, source: std::io::Error) -> Self {
         Self::Read {
             path: path.into(),
-            source,
+            error: Arc::new(source),
         }
     }
 
@@ -95,7 +115,7 @@ impl ScanError {
     pub fn parse(path: impl Into<Utf8PathBuf>, source: ch_ts_parser::ParseError) -> Self {
         Self::Parse {
             path: path.into(),
-            source,
+            error: source,
         }
     }
 
@@ -127,7 +147,7 @@ impl ScanError {
     pub fn path(&self) -> Option<&Utf8PathBuf> {
         match self {
             Self::Read { path, .. } | Self::Parse { path, .. } => Some(path),
-            Self::Walk(_) | Self::Config(_) | Self::NonUtf8Path(_) => None,
+            Self::Walk { .. } | Self::Config(_) | Self::NonUtf8Path(_) => None,
         }
     }
 }
@@ -177,5 +197,12 @@ mod tests {
     fn test_scan_error_display() {
         let err = ScanError::Config("test error".to_owned());
         assert_eq!(err.to_string(), "invalid configuration: test error");
+    }
+
+    #[test]
+    fn test_scan_error_clone() {
+        let err1 = ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
+        let err2 = err1.clone();
+        assert_eq!(err1.path(), err2.path());
     }
 }

@@ -3,10 +3,18 @@
 //! This module provides the [`ParseError`] type for errors that can occur
 //! during TypeScript parsing and import extraction.
 
+use std::sync::Arc;
+
 /// Errors that can occur during TypeScript parsing.
 ///
 /// These errors cover initialization failures, query compilation errors,
 /// and parse failures.
+///
+/// # Cloning
+///
+/// `ParseError` implements `Clone` for use in streaming APIs where errors
+/// need to be sent through channels. The `QueryError` is wrapped in `Arc`
+/// for efficient cloning.
 ///
 /// # Examples
 ///
@@ -24,7 +32,7 @@
 ///     }
 /// }
 /// ```
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ParseError {
     /// Failed to create a new tree-sitter parser.
     #[error("failed to initialize tree-sitter parser")]
@@ -41,8 +49,8 @@ pub enum ParseError {
     QueryCompile {
         /// The byte offset in the query string where the error occurred.
         offset: usize,
-        /// The kind of query error.
-        kind: tree_sitter::QueryError,
+        /// The kind of query error (wrapped in Arc for cloning).
+        kind: Arc<tree_sitter::QueryError>,
     },
 
     /// Failed to parse the source code.

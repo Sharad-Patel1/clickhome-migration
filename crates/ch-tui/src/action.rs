@@ -87,6 +87,11 @@ pub enum Action {
     /// Rescan a specific file.
     RescanFile(camino::Utf8PathBuf),
 
+    /// Start a background streaming scan.
+    ///
+    /// This initiates a new scan that streams results incrementally.
+    StartStreamingScan,
+
     /// Open the selected file in the default editor.
     OpenInEditor,
 
