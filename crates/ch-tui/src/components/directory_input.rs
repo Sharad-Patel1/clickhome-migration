@@ -85,11 +85,7 @@ fn build_field_line<'a>(
         Style::default().fg(Color::Gray)
     };
 
-    let display_value = if value.is_empty() {
-        "<unset>"
-    } else {
-        value
-    };
+    let display_value = if value.is_empty() { "<unset>" } else { value };
 
     let mut spans = vec![
         Span::styled(format!("{label}: "), label_style),

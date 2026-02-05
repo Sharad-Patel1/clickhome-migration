@@ -193,8 +193,8 @@ impl FileWalker {
             let path = entry.path();
 
             // Convert to UTF-8 path
-            let utf8_path = Utf8Path::from_path(path)
-                .ok_or_else(|| ScanError::NonUtf8Path(path.to_owned()))?;
+            let utf8_path =
+                Utf8Path::from_path(path).ok_or_else(|| ScanError::NonUtf8Path(path.to_owned()))?;
 
             // Check if it's a TypeScript file
             if !self.is_typescript_file(utf8_path) {

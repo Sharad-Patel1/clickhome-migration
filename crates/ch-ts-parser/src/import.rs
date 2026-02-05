@@ -29,9 +29,7 @@ use smallvec::{smallvec, SmallVec};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, Tree};
 
-use crate::arena::{
-    create_dynamic_bump_import, BumpImportBuilder, BumpImportInfo, StringInterner,
-};
+use crate::arena::{create_dynamic_bump_import, BumpImportBuilder, BumpImportInfo, StringInterner};
 use crate::queries::{
     CAPTURE_IMPORT_DEFAULT_NAME, CAPTURE_IMPORT_DYNAMIC_SOURCE, CAPTURE_IMPORT_NAMED_NAME,
     CAPTURE_IMPORT_NAMESPACE_NAME, CAPTURE_IMPORT_SOURCE, CAPTURE_IMPORT_STATEMENT,
@@ -73,8 +71,10 @@ pub fn extract_imports(tree: &Tree, source: &str, query: &Query) -> SmallVec<[Im
     let bump_imports = extract_imports_arena(&arena, tree, source, query);
 
     // Convert to owned and collect
-    let mut imports: SmallVec<[ImportInfo; 8]> =
-        bump_imports.into_iter().map(BumpImportInfo::into_owned).collect();
+    let mut imports: SmallVec<[ImportInfo; 8]> = bump_imports
+        .into_iter()
+        .map(BumpImportInfo::into_owned)
+        .collect();
 
     // Sort by source location for consistent ordering
     imports.sort_by_key(|i| (i.location.line, i.location.column));
@@ -231,7 +231,11 @@ pub fn extract_imports_arena<'bump>(
                         let path = interner.intern(text);
                         let model_source = detect_model_source(path.as_str());
                         let location = node_to_location(node);
-                        dynamic_imports.push(create_dynamic_bump_import(path, model_source, location));
+                        dynamic_imports.push(create_dynamic_bump_import(
+                            path,
+                            model_source,
+                            location,
+                        ));
                     }
                 }
                 _ => {}
@@ -515,7 +519,11 @@ import '@angular/core';
         assert_eq!(bump_imports.len(), 1);
 
         // Convert to owned
-        let owned: ImportInfo = bump_imports.into_iter().next().expect("should have one").into();
+        let owned: ImportInfo = bump_imports
+            .into_iter()
+            .next()
+            .expect("should have one")
+            .into();
         assert_eq!(owned.path, "'../shared/models/foo'");
         assert_eq!(owned.names[0], "Foo");
     }
@@ -538,7 +546,10 @@ import { Bar } from '../shared/models/foo';
         // Both imports should have paths pointing to the same interned string
         let path1 = imports[0].path.as_str();
         let path2 = imports[1].path.as_str();
-        assert!(std::ptr::eq(path1, path2), "Paths should be interned (same pointer)");
+        assert!(
+            std::ptr::eq(path1, path2),
+            "Paths should be interned (same pointer)"
+        );
     }
 
     #[test]
@@ -583,9 +594,18 @@ import { Other } from '@angular/core';
         let imports = extract_imports_arena(&arena, &tree, source, &query);
         assert_eq!(imports.len(), 3);
 
-        let legacy = imports.iter().find(|i| i.path.contains("shared/models")).expect("should have legacy");
-        let new = imports.iter().find(|i| i.path.contains("shared_2023")).expect("should have new");
-        let other = imports.iter().find(|i| i.path.contains("angular")).expect("should have other");
+        let legacy = imports
+            .iter()
+            .find(|i| i.path.contains("shared/models"))
+            .expect("should have legacy");
+        let new = imports
+            .iter()
+            .find(|i| i.path.contains("shared_2023"))
+            .expect("should have new");
+        let other = imports
+            .iter()
+            .find(|i| i.path.contains("angular"))
+            .expect("should have other");
 
         assert_eq!(legacy.source, Some(ModelSource::SharedLegacy));
         assert_eq!(new.source, Some(ModelSource::Shared2023));

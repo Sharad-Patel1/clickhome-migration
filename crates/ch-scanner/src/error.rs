@@ -174,7 +174,10 @@ mod tests {
 
     #[test]
     fn test_scan_error_read() {
-        let err = ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
+        let err = ScanError::read(
+            "src/foo.ts",
+            io::Error::new(io::ErrorKind::NotFound, "not found"),
+        );
         assert!(err.is_recoverable());
         assert!(!err.is_fatal());
         assert_eq!(err.path().map(|p| p.as_str()), Some("src/foo.ts"));
@@ -225,7 +228,10 @@ mod tests {
 
     #[test]
     fn test_scan_error_clone() {
-        let err1 = ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
+        let err1 = ScanError::read(
+            "src/foo.ts",
+            io::Error::new(io::ErrorKind::NotFound, "not found"),
+        );
         let err2 = err1.clone();
         assert_eq!(err1.path(), err2.path());
     }

@@ -351,8 +351,12 @@ mod tests {
     #[test]
     fn test_smallvec_stack_allocation() {
         // SmallVec<[String; 4]> should use stack allocation for <= 4 elements
-        let names: SmallVec<[String; 4]> =
-            smallvec!["A".to_owned(), "B".to_owned(), "C".to_owned(), "D".to_owned()];
+        let names: SmallVec<[String; 4]> = smallvec![
+            "A".to_owned(),
+            "B".to_owned(),
+            "C".to_owned(),
+            "D".to_owned()
+        ];
         assert_eq!(names.len(), 4);
         // Note: We can't easily test if it's on the stack, but we verify it works
     }

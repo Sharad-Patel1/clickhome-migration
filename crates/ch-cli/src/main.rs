@@ -167,18 +167,12 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
 
     // Validate path exists
     if !path.exists() {
-        return Err(color_eyre::eyre::eyre!(
-            "Path does not exist: {}",
-            path
-        ));
+        return Err(color_eyre::eyre::eyre!("Path does not exist: {}", path));
     }
 
     // Validate path is a directory
     if !path.is_dir() {
-        return Err(color_eyre::eyre::eyre!(
-            "Path is not a directory: {}",
-            path
-        ));
+        return Err(color_eyre::eyre::eyre!("Path is not a directory: {}", path));
     }
 
     let mut config = Config::default();
@@ -256,8 +250,8 @@ fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::
 /// Returns an error if the scanner cannot be created.
 fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
     // Use app_path for scanning (not root_path) to restrict to application code only
-    let scanner_config = ScannerConfig::new(&config.scan.app_path)
-        .with_skip_dirs(&["node_modules", "dist", ".git"]);
+    let scanner_config =
+        ScannerConfig::new(&config.scan.app_path).with_skip_dirs(&["node_modules", "dist", ".git"]);
     let matcher = ModelPathMatcher::from_scan_config(&config.scan);
 
     Scanner::new_with_matcher(scanner_config, matcher)
@@ -403,13 +397,29 @@ fn print_stats_summary(stats: &StatsSnapshot) {
     let _ = writeln!(handle, "========================");
     let _ = writeln!(handle);
     let _ = writeln!(handle, "Total files scanned: {}", stats.total);
-    let _ = writeln!(handle, "  Legacy:           {} (need migration)", stats.legacy);
-    let _ = writeln!(handle, "  Partial:          {} (in progress)", stats.partial);
+    let _ = writeln!(
+        handle,
+        "  Legacy:           {} (need migration)",
+        stats.legacy
+    );
+    let _ = writeln!(
+        handle,
+        "  Partial:          {} (in progress)",
+        stats.partial
+    );
     let _ = writeln!(handle, "  Migrated:         {} (complete)", stats.migrated);
-    let _ = writeln!(handle, "  No models:        {} (no action needed)", stats.no_models);
+    let _ = writeln!(
+        handle,
+        "  No models:        {} (no action needed)",
+        stats.no_models
+    );
     let _ = writeln!(handle, "  Errors:           {}", stats.errors);
     let _ = writeln!(handle);
-    let _ = writeln!(handle, "Migration progress: {:.1}%", stats.progress_percent());
+    let _ = writeln!(
+        handle,
+        "Migration progress: {:.1}%",
+        stats.progress_percent()
+    );
     let _ = writeln!(handle, "Files needing work: {}", stats.needs_migration());
 }
 
@@ -439,10 +449,7 @@ fn print_detailed_file_list(scanner: &Scanner) {
 }
 
 /// Generates a JSON report.
-fn generate_json_report(
-    stats: &StatsSnapshot,
-    files: &[FileInfo],
-) -> color_eyre::Result<String> {
+fn generate_json_report(stats: &StatsSnapshot, files: &[FileInfo]) -> color_eyre::Result<String> {
     #[derive(serde::Serialize)]
     struct Report<'a> {
         stats: &'a StatsSnapshot,

@@ -382,7 +382,10 @@ impl<'bump> StringInterner<'bump> {
     pub fn with_capacity(arena: &'bump Bump, capacity: usize) -> Self {
         Self {
             arena,
-            interned: FxHashMap::with_capacity_and_hasher(capacity, ch_core::FxBuildHasher::default()),
+            interned: FxHashMap::with_capacity_and_hasher(
+                capacity,
+                ch_core::FxBuildHasher::default(),
+            ),
         }
     }
 

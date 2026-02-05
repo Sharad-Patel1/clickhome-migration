@@ -145,7 +145,10 @@ mod tests {
 
     #[test]
     fn test_watch_error_io() {
-        let err = WatchError::Io(io::Error::new(io::ErrorKind::PermissionDenied, "access denied"));
+        let err = WatchError::Io(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "access denied",
+        ));
         assert!(!err.is_recoverable());
         assert!(err.is_fatal());
         assert!(err.path().is_none());

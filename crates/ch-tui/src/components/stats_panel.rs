@@ -30,7 +30,11 @@ pub struct StatsPanel<'a> {
 impl<'a> StatsPanel<'a> {
     /// Creates a new stats panel.
     #[must_use]
-    pub const fn new(stats: &'a StatsSnapshot, scan_state: &'a ScanState, theme: &'a Theme) -> Self {
+    pub const fn new(
+        stats: &'a StatsSnapshot,
+        scan_state: &'a ScanState,
+        theme: &'a Theme,
+    ) -> Self {
         Self {
             stats,
             scan_state,
@@ -55,7 +59,11 @@ impl Widget for &StatsPanel<'_> {
             .split(inner);
 
         // Show scanning progress OR migration stats based on scan state
-        if let ScanState::Scanning { discovered, scanned } = self.scan_state {
+        if let ScanState::Scanning {
+            discovered,
+            scanned,
+        } = self.scan_state
+        {
             // Render scanning progress
             render_scanning_progress(*discovered, *scanned, &chunks, buf);
         } else {
@@ -66,12 +74,7 @@ impl Widget for &StatsPanel<'_> {
 }
 
 /// Renders the scanning progress view.
-fn render_scanning_progress(
-    discovered: usize,
-    scanned: usize,
-    chunks: &[Rect],
-    buf: &mut Buffer,
-) {
+fn render_scanning_progress(discovered: usize, scanned: usize, chunks: &[Rect], buf: &mut Buffer) {
     // Scanning status text
     let scanning_line = Line::from(vec![
         Span::styled(
@@ -90,7 +93,11 @@ fn render_scanning_progress(
     status_paragraph.render(chunks[0], buf);
 
     // Scanning progress gauge
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let progress_percent = if discovered > 0 {
         ((scanned as f64 / discovered as f64) * 100.0).round() as u16
     } else {
@@ -106,12 +113,7 @@ fn render_scanning_progress(
 }
 
 /// Renders the normal migration statistics view.
-fn render_migration_stats(
-    stats: &StatsSnapshot,
-    chunks: &[Rect],
-    buf: &mut Buffer,
-    theme: &Theme,
-) {
+fn render_migration_stats(stats: &StatsSnapshot, chunks: &[Rect], buf: &mut Buffer, theme: &Theme) {
     // Render stats counts
     let stats_line = Line::from(vec![
         Span::styled("Legacy: ", Style::default().fg(Color::DarkGray)),
@@ -148,11 +150,7 @@ fn render_migration_stats(
     let progress_u16 = stats.progress_percent().round() as u16;
 
     let gauge = Gauge::default()
-        .gauge_style(
-            Style::default()
-                .fg(theme.migrated_fg)
-                .bg(Color::DarkGray),
-        )
+        .gauge_style(Style::default().fg(theme.migrated_fg).bg(Color::DarkGray))
         .percent(progress_u16)
         .label(format!("{:.1}%", stats.progress_percent()));
 

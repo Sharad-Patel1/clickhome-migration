@@ -65,7 +65,10 @@ impl<'a> StatusBar<'a> {
 
         // Filter indicator
         if self.app.filter.is_active() {
-            spans.push(Span::styled("Filter: ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "Filter: ",
+                Style::default().fg(Color::DarkGray),
+            ));
             if !self.app.filter.text.is_empty() {
                 spans.push(Span::styled(
                     format!("\"{}\"", self.app.filter.text),

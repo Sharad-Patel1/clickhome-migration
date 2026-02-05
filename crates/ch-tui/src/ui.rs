@@ -43,10 +43,10 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Length(3),  // Stats
-            Constraint::Min(10),    // Main content
-            Constraint::Length(1),  // Status bar
+            Constraint::Length(3), // Header
+            Constraint::Length(3), // Stats
+            Constraint::Min(10),   // Main content
+            Constraint::Length(1), // Status bar
         ])
         .split(area);
 
@@ -109,11 +109,7 @@ fn render_main_content(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) 
     );
 
     // Render detail pane
-    let detail_pane = DetailPane::new(
-        app.selected_file(),
-        app.focus == Focus::DetailPane,
-        theme,
-    );
+    let detail_pane = DetailPane::new(app.selected_file(), app.focus == Focus::DetailPane, theme);
     frame.render_stateful_widget(
         &detail_pane,
         content_chunks[1],

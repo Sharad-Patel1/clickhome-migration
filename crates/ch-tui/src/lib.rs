@@ -245,7 +245,8 @@ async fn run_event_loop(
                             Ok(w) => *watcher = Some(w),
                             Err(e) => {
                                 error!(error = %e, "Failed to start file watcher");
-                                app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
+                                app.status =
+                                    Some(StatusMessage::error(format!("Watcher failed: {e}")));
                             }
                         }
                         // Clear the scan receiver since scan is done
@@ -265,14 +266,19 @@ async fn run_event_loop(
             match action {
                 Action::OpenInEditor => {
                     let selected = app.selected_file().map(|file| {
-                        let legacy_location = file.legacy_imports().next().map(|import| import.location);
+                        let legacy_location =
+                            file.legacy_imports().next().map(|import| import.location);
                         let fallback_location = file.imports.first().map(|import| import.location);
                         (file.path.clone(), legacy_location.or(fallback_location))
                     });
                     if let Some((path, location)) = selected {
-                        if let Err(e) =
-                            editor::run_editor(&path, &app.config.scan.root_path, &app.config, tui, location)
-                        {
+                        if let Err(e) = editor::run_editor(
+                            &path,
+                            &app.config.scan.root_path,
+                            &app.config,
+                            tui,
+                            location,
+                        ) {
                             app.status = Some(StatusMessage::error(format!("Editor failed: {e}")));
                         }
                     } else {
@@ -290,7 +296,8 @@ async fn run_event_loop(
                 }
 
                 info!(path = %root, "Restarting file watcher");
-                match FileWatcher::new(&root, &app.config.watch, TypeScriptFilter::default()).await {
+                match FileWatcher::new(&root, &app.config.watch, TypeScriptFilter::default()).await
+                {
                     Ok(w) => *watcher = Some(w),
                     Err(e) => {
                         error!(error = %e, "Failed to restart file watcher");

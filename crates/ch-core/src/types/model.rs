@@ -507,13 +507,15 @@ impl ModelRegistry {
                 for export in &definition.exports {
                     self.legacy_exports.insert(export.clone());
                 }
-                self.legacy_models.insert(definition.name.clone(), definition);
+                self.legacy_models
+                    .insert(definition.name.clone(), definition);
             }
             ModelSource::Shared2023 => {
                 for export in &definition.exports {
                     self.modern_exports.insert(export.clone());
                 }
-                self.modern_models.insert(definition.name.clone(), definition);
+                self.modern_models
+                    .insert(definition.name.clone(), definition);
             }
         }
     }
@@ -658,7 +660,9 @@ impl ModelRegistry {
 
     /// Returns an iterator over all model definitions.
     pub fn iter_all_models(&self) -> impl Iterator<Item = &ModelDefinition> {
-        self.legacy_models.values().chain(self.modern_models.values())
+        self.legacy_models
+            .values()
+            .chain(self.modern_models.values())
     }
 
     /// Returns a legacy model definition by name, if it exists.
@@ -745,8 +749,7 @@ mod tests {
 
     #[test]
     fn test_model_reference_is_legacy() {
-        let legacy =
-            ModelReference::new("Foo", ModelCategory::Model, ModelSource::SharedLegacy);
+        let legacy = ModelReference::new("Foo", ModelCategory::Model, ModelSource::SharedLegacy);
         assert!(legacy.is_legacy());
 
         let new = ModelReference::new("Foo", ModelCategory::Model, ModelSource::Shared2023);
@@ -828,7 +831,11 @@ mod tests {
             name: "Foo".to_owned(),
             source: ModelSource::SharedLegacy,
             definition_path: "shared/models/foo.ts".into(),
-            exports: smallvec!["Foo".to_owned(), "FooModel".to_owned(), "FooCodeGen".to_owned()],
+            exports: smallvec![
+                "Foo".to_owned(),
+                "FooModel".to_owned(),
+                "FooCodeGen".to_owned()
+            ],
         };
         registry.register(definition);
 

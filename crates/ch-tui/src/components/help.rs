@@ -129,10 +129,7 @@ impl<'a> HelpPanel<'a> {
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD),
                     )),
-                    Cell::from(Span::styled(
-                        binding.description,
-                        self.theme.base_style(),
-                    )),
+                    Cell::from(Span::styled(binding.description, self.theme.base_style())),
                     Cell::from(Span::styled(
                         binding.mode,
                         Style::default().fg(Color::DarkGray),
