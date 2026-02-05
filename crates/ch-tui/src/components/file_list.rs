@@ -52,10 +52,8 @@ impl<'a> FileListView<'a> {
     /// Builds rows for the table from the file list.
     fn build_rows(&self, state: &FileListState) -> Vec<Row<'a>> {
         let indices = state.filtered_indices();
-        let file_indices: Vec<usize> = indices.map_or_else(
-            || (0..self.files.len()).collect(),
-            <[usize]>::to_vec,
-        );
+        let file_indices: Vec<usize> =
+            indices.map_or_else(|| (0..self.files.len()).collect(), <[usize]>::to_vec);
 
         file_indices
             .into_iter()
@@ -78,14 +76,8 @@ impl<'a> FileListView<'a> {
         // Build cells
         let cells = vec![
             Cell::from(Span::styled(status_indicator, status_style)),
-            Cell::from(Span::styled(
-                path_display,
-                self.theme.base_style(),
-            )),
-            Cell::from(Span::styled(
-                file.status.label(),
-                status_style,
-            )),
+            Cell::from(Span::styled(path_display, self.theme.base_style())),
+            Cell::from(Span::styled(file.status.label(), status_style)),
         ];
 
         Row::new(cells).height(1)
@@ -108,10 +100,7 @@ impl StatefulWidget for &FileListView<'_> {
         };
 
         let title = if self.filter.is_active() {
-            format!(
-                " Files ({} filtered) ",
-                state.len(self.files.len())
-            )
+            format!(" Files ({} filtered) ", state.len(self.files.len()))
         } else {
             format!(" Files ({}) ", self.files.len())
         };
@@ -160,7 +149,10 @@ fn truncate_path(path: &str, max_width: usize) -> String {
 
     if available < 10 {
         // Path is too short, just truncate
-        return format!("{ellipsis}{}", &path[path.len().saturating_sub(available)..]);
+        return format!(
+            "{ellipsis}{}",
+            &path[path.len().saturating_sub(available)..]
+        );
     }
 
     // Show as much of the end as possible

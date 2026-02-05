@@ -211,62 +211,60 @@ impl FileAnalyzer {
         // Collect errors using mutex (errors are rare, so contention is minimal)
         let errors: Mutex<Vec<(Utf8PathBuf, ScanError)>> = Mutex::new(Vec::new());
 
-        paths
-            .par_iter()
-            .for_each_init(
-                // Per-thread initialization: create parser + get arena member
-                || {
-                    let ts_parser = ArenaParser::new().ok();
-                    let tsx_parser = ArenaParser::new_tsx().ok();
-                    let member = herd.get();
-                    (ts_parser, tsx_parser, member, tx.clone())
-                },
-                // Process each file
-                |(ts_parser, tsx_parser, member, sender), path| {
-                    stats.increment_total();
+        paths.par_iter().for_each_init(
+            // Per-thread initialization: create parser + get arena member
+            || {
+                let ts_parser = ArenaParser::new().ok();
+                let tsx_parser = ArenaParser::new_tsx().ok();
+                let member = herd.get();
+                (ts_parser, tsx_parser, member, tx.clone())
+            },
+            // Process each file
+            |(ts_parser, tsx_parser, member, sender), path| {
+                stats.increment_total();
 
-                    let result = self.analyze_file_inner(
-                        path,
-                        ts_parser.as_mut(),
-                        tsx_parser.as_mut(),
-                        member.as_bump(),
-                        matcher,
-                        registry,
-                    );
+                let result = self.analyze_file_inner(
+                    path,
+                    ts_parser.as_mut(),
+                    tsx_parser.as_mut(),
+                    member.as_bump(),
+                    matcher,
+                    registry,
+                );
 
-                    match result {
-                        Ok(file_info) => {
-                            // Update statistics based on status
-                            match file_info.status {
-                                MigrationStatus::Legacy => stats.increment_legacy(),
-                                MigrationStatus::Migrated => stats.increment_migrated(),
-                                MigrationStatus::Partial => stats.increment_partial(),
-                                MigrationStatus::NoModels => stats.increment_no_models(),
-                                _ => {} // Handle any future status variants
-                            }
-
-                            // Insert into cache
-                            cache.insert(file_info.clone());
-
-                            // Send update (ignore if receiver dropped)
-                            // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
-                            let _ = sender.blocking_send(ScanUpdate::FileScanned(Box::new(file_info)));
+                match result {
+                    Ok(file_info) => {
+                        // Update statistics based on status
+                        match file_info.status {
+                            MigrationStatus::Legacy => stats.increment_legacy(),
+                            MigrationStatus::Migrated => stats.increment_migrated(),
+                            MigrationStatus::Partial => stats.increment_partial(),
+                            MigrationStatus::NoModels => stats.increment_no_models(),
+                            _ => {} // Handle any future status variants
                         }
-                        Err(e) => {
-                            stats.increment_errors();
 
-                            // Collect error
-                            errors.lock().push((path.clone(), e.clone()));
+                        // Insert into cache
+                        cache.insert(file_info.clone());
 
-                            // Send error update (ignore if receiver dropped)
-                            let _ = sender.blocking_send(ScanUpdate::FileError {
-                                path: path.clone(),
-                                error: e,
-                            });
-                        }
+                        // Send update (ignore if receiver dropped)
+                        // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
+                        let _ = sender.blocking_send(ScanUpdate::FileScanned(Box::new(file_info)));
                     }
-                },
-            );
+                    Err(e) => {
+                        stats.increment_errors();
+
+                        // Collect error
+                        errors.lock().push((path.clone(), e.clone()));
+
+                        // Send error update (ignore if receiver dropped)
+                        let _ = sender.blocking_send(ScanUpdate::FileError {
+                            path: path.clone(),
+                            error: e,
+                        });
+                    }
+                }
+            },
+        );
 
         // Return collected errors
         errors.into_inner()
@@ -307,14 +305,7 @@ impl FileAnalyzer {
         }
         .map_err(|e| ScanError::parse(path, e))?;
 
-        self.analyze_file_inner(
-            path,
-            Some(&mut parser),
-            None,
-            &arena,
-            matcher,
-            registry,
-        )
+        self.analyze_file_inner(path, Some(&mut parser), None, &arena, matcher, registry)
     }
 
     /// Internal file analysis implementation.
@@ -329,8 +320,8 @@ impl FileAnalyzer {
         registry: Option<&ModelRegistry>,
     ) -> Result<FileInfo, ScanError> {
         // Read file contents
-        let contents = fs::read_to_string(path.as_std_path())
-            .map_err(|e| ScanError::read(path, e))?;
+        let contents =
+            fs::read_to_string(path.as_std_path()).map_err(|e| ScanError::read(path, e))?;
 
         // Calculate content hash
         let content_hash = hash_content(&contents);
@@ -369,9 +360,10 @@ impl FileAnalyzer {
                 // If we have a registry, validate that at least one imported name
                 // is a known model export from the detected source
                 if let Some(reg) = registry {
-                    let has_model_export = import.names.iter().any(|name| {
-                        reg.is_export_from(name, detected_source)
-                    });
+                    let has_model_export = import
+                        .names
+                        .iter()
+                        .any(|name| reg.is_export_from(name, detected_source));
 
                     // Only mark as model import if it has actual model exports
                     import.source = if has_model_export {

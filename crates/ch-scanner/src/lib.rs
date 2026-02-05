@@ -626,7 +626,10 @@ impl Scanner {
         info!(count = path_count, "Collected TypeScript files");
 
         // Send paths discovered notification
-        if tx.blocking_send(ScanUpdate::PathsDiscovered(path_count)).is_err() {
+        if tx
+            .blocking_send(ScanUpdate::PathsDiscovered(path_count))
+            .is_err()
+        {
             // Receiver dropped, return early
             return Ok(());
         }
@@ -897,10 +900,7 @@ mod tests {
         );
 
         assert!(config.use_registry);
-        assert_eq!(
-            config.shared_path,
-            Some(Utf8PathBuf::from("./src/shared"))
-        );
+        assert_eq!(config.shared_path, Some(Utf8PathBuf::from("./src/shared")));
         assert_eq!(
             config.shared_2023_path,
             Some(Utf8PathBuf::from("./src/shared_2023"))

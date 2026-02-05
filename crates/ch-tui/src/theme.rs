@@ -96,9 +96,9 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             // Status colors
-            legacy_fg: Color::Rgb(255, 100, 100), // Soft red
-            migrated_fg: Color::Rgb(100, 255, 100), // Soft green
-            partial_fg: Color::Rgb(255, 200, 100), // Soft yellow/orange
+            legacy_fg: Color::Rgb(255, 100, 100),    // Soft red
+            migrated_fg: Color::Rgb(100, 255, 100),  // Soft green
+            partial_fg: Color::Rgb(255, 200, 100),   // Soft yellow/orange
             no_models_fg: Color::Rgb(128, 128, 128), // Gray
 
             // Selection colors
@@ -137,9 +137,9 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             // Status colors
-            legacy_fg: Color::Rgb(180, 50, 50), // Dark red
-            migrated_fg: Color::Rgb(50, 150, 50), // Dark green
-            partial_fg: Color::Rgb(180, 130, 50), // Dark yellow/orange
+            legacy_fg: Color::Rgb(180, 50, 50),      // Dark red
+            migrated_fg: Color::Rgb(50, 150, 50),    // Dark green
+            partial_fg: Color::Rgb(180, 130, 50),    // Dark yellow/orange
             no_models_fg: Color::Rgb(100, 100, 100), // Dark gray
 
             // Selection colors
@@ -273,10 +273,7 @@ mod tests {
     fn test_status_color() {
         let theme = Theme::dark();
 
-        assert_eq!(
-            theme.status_color(MigrationStatus::Legacy),
-            theme.legacy_fg
-        );
+        assert_eq!(theme.status_color(MigrationStatus::Legacy), theme.legacy_fg);
         assert_eq!(
             theme.status_color(MigrationStatus::Migrated),
             theme.migrated_fg

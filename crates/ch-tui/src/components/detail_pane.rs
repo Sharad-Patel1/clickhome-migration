@@ -55,10 +55,7 @@ impl<'a> DetailPane<'a> {
 
         let text = Text::from(vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "No file selected",
-                self.theme.dimmed_style(),
-            )),
+            Line::from(Span::styled("No file selected", self.theme.dimmed_style())),
             Line::from(""),
             Line::from(Span::styled(
                 "Select a file from the list",
@@ -78,7 +75,13 @@ impl<'a> DetailPane<'a> {
     }
 
     /// Renders the file details.
-    fn render_details(&self, file: &FileInfo, area: Rect, buf: &mut Buffer, state: &mut DetailPaneState) {
+    fn render_details(
+        &self,
+        file: &FileInfo,
+        area: Rect,
+        buf: &mut Buffer,
+        state: &mut DetailPaneState,
+    ) {
         let border_style = if self.focused {
             self.theme.focused_border_style
         } else {
@@ -117,10 +120,7 @@ impl<'a> DetailPane<'a> {
         // Status
         lines.push(Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                file.status.label(),
-                self.theme.status_style(file.status),
-            ),
+            Span::styled(file.status.label(), self.theme.status_style(file.status)),
         ]));
 
         // Separator
@@ -206,10 +206,7 @@ impl<'a> DetailPane<'a> {
                     Span::raw(" "),
                     Span::styled(model_ref.name.clone(), self.theme.base_style()),
                     Span::raw(" "),
-                    Span::styled(
-                        format!("[{}]", model_ref.source.dir_name()),
-                        source_style,
-                    ),
+                    Span::styled(format!("[{}]", model_ref.source.dir_name()), source_style),
                 ]));
             }
         }

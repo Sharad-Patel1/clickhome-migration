@@ -30,10 +30,7 @@ struct EditorCommand {
 impl EditorCommand {
     fn with_wait_flag(mut self) -> Self {
         if matches!(self.kind, EditorKind::Cursor | EditorKind::VsCode)
-            && !self
-                .args
-                .iter()
-                .any(|arg| arg == "--wait" || arg == "-w")
+            && !self.args.iter().any(|arg| arg == "--wait" || arg == "-w")
         {
             self.args.push("--wait".to_owned());
         }
@@ -41,7 +38,11 @@ impl EditorCommand {
     }
 }
 
-fn location_args(kind: EditorKind, path: &Utf8Path, location: Option<SourceLocation>) -> Vec<String> {
+fn location_args(
+    kind: EditorKind,
+    path: &Utf8Path,
+    location: Option<SourceLocation>,
+) -> Vec<String> {
     let Some(location) = location.filter(|loc| loc.line > 0) else {
         return vec![path.to_string()];
     };
@@ -51,10 +52,9 @@ fn location_args(kind: EditorKind, path: &Utf8Path, location: Option<SourceLocat
 
     match kind {
         EditorKind::Cursor | EditorKind::VsCode => vec![format!("{}:{line}:{column}", path)],
-        EditorKind::Nvim | EditorKind::Vim => vec![
-            format!("+call cursor({line},{column})"),
-            path.to_string(),
-        ],
+        EditorKind::Nvim | EditorKind::Vim => {
+            vec![format!("+call cursor({line},{column})"), path.to_string()]
+        }
         EditorKind::Nano => vec![format!("+{line},{column}"), path.to_string()],
         EditorKind::Other => vec![path.to_string()],
     }
@@ -100,15 +100,11 @@ fn resolve_editor(config: &Config) -> Result<EditorCommand, TuiError> {
     } else if let Ok(editor) = env::var("EDITOR") {
         candidates.push(editor);
     } else {
-        candidates.extend([
-            "cursor",
-            "code",
-            "nvim",
-            "vim",
-            "nano",
-        ]
-        .into_iter()
-        .map(str::to_owned));
+        candidates.extend(
+            ["cursor", "code", "nvim", "vim", "nano"]
+                .into_iter()
+                .map(str::to_owned),
+        );
     }
 
     for candidate in candidates {
@@ -168,7 +164,11 @@ pub fn run_editor(
                 command.arg("--goto");
             }
         }
-        command.args(location_args(editor.kind, absolute_path.as_path(), location));
+        command.args(location_args(
+            editor.kind,
+            absolute_path.as_path(),
+            location,
+        ));
 
         let status = command.status()?;
         if status.success() {

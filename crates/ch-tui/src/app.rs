@@ -85,7 +85,11 @@ impl ScanState {
     #[must_use]
     pub fn progress_percent(&self) -> Option<f64> {
         match self {
-            Self::Scanning { discovered, scanned } if *discovered > 0 => {
+            Self::Scanning {
+                discovered,
+                scanned,
+            } if *discovered > 0 =>
+            {
                 #[allow(clippy::cast_precision_loss)]
                 Some((*scanned as f64 / *discovered as f64) * 100.0)
             }
@@ -143,9 +147,7 @@ impl FileListState {
     /// Returns the number of items in the filtered list.
     #[must_use]
     pub fn len(&self, total_files: usize) -> usize {
-        self.filtered_indices
-            .as_ref()
-            .map_or(total_files, Vec::len)
+        self.filtered_indices.as_ref().map_or(total_files, Vec::len)
     }
 
     /// Returns `true` if the filtered list is empty.
@@ -253,7 +255,11 @@ impl FileListState {
     pub fn set_filter(&mut self, indices: Option<Vec<usize>>) {
         self.filtered_indices = indices;
         // Reset selection when filter changes
-        self.selected = if self.filtered_indices.as_ref().is_some_and(|v| !v.is_empty()) {
+        self.selected = if self
+            .filtered_indices
+            .as_ref()
+            .is_some_and(|v| !v.is_empty())
+        {
             Some(0)
         } else {
             None
@@ -777,23 +783,20 @@ impl App {
             }
             Action::ExitDirectorySetup => {
                 if Self::requires_directory_setup(&self.config) {
-                    self.status = Some(StatusMessage::error(
-                        "Directory setup required to continue",
-                    ));
+                    self.status =
+                        Some(StatusMessage::error("Directory setup required to continue"));
                 } else {
                     self.mode = AppMode::Normal;
                 }
             }
-            Action::ApplyDirectorySetup => {
-                match self.apply_directory_setup() {
-                    Ok(()) => {
-                        self.mode = AppMode::Normal;
-                    }
-                    Err(e) => {
-                        self.status = Some(StatusMessage::error(format!("{e}")));
-                    }
+            Action::ApplyDirectorySetup => match self.apply_directory_setup() {
+                Ok(()) => {
+                    self.mode = AppMode::Normal;
                 }
-            }
+                Err(e) => {
+                    self.status = Some(StatusMessage::error(format!("{e}")));
+                }
+            },
 
             Action::ShowStatus(text) => {
                 self.status = Some(StatusMessage::info(text));
@@ -1004,8 +1007,11 @@ impl App {
 
     fn rebuild_scanner(&mut self) -> Result<(), TuiError> {
         // Use app_path for scanning to restrict to application code only
-        let scanner_config = ScannerConfig::new(&self.config.scan.app_path)
-            .with_skip_dirs(&["node_modules", "dist", ".git"]);
+        let scanner_config = ScannerConfig::new(&self.config.scan.app_path).with_skip_dirs(&[
+            "node_modules",
+            "dist",
+            ".git",
+        ]);
         let matcher = ModelPathMatcher::from_scan_config(&self.config.scan);
         self.scanner = Scanner::new_with_matcher(scanner_config, matcher)?;
         Ok(())
@@ -1057,8 +1063,8 @@ impl App {
             .enumerate()
             .filter(|(_, file)| {
                 // Text filter
-                let text_match =
-                    text_lower.is_empty() || file.path.as_str().to_lowercase().contains(&text_lower);
+                let text_match = text_lower.is_empty()
+                    || file.path.as_str().to_lowercase().contains(&text_lower);
 
                 // Status filter
                 let status_match = status_filter.is_none_or(|s| file.status == s);

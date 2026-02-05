@@ -199,7 +199,14 @@ impl FileWatcher {
 
         // Spawn blocking task for notify
         let task_handle = tokio::task::spawn_blocking(move || {
-            run_watcher_loop(task_path, debounce_ms, recursive, event_tx, shutdown_rx, filter)
+            run_watcher_loop(
+                task_path,
+                debounce_ms,
+                recursive,
+                event_tx,
+                shutdown_rx,
+                filter,
+            )
         });
 
         Ok(Self {
@@ -243,7 +250,14 @@ impl FileWatcher {
         let recursive = config.recursive;
 
         let task_handle = tokio::task::spawn_blocking(move || {
-            run_watcher_loop(task_path, debounce_ms, recursive, event_tx, shutdown_rx, filter)
+            run_watcher_loop(
+                task_path,
+                debounce_ms,
+                recursive,
+                event_tx,
+                shutdown_rx,
+                filter,
+            )
         });
 
         Ok(Self {
@@ -310,11 +324,7 @@ impl FileWatcher {
     /// if an error occurs in the blocking task.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.shutdown_tx.is_some()
-            && self
-                .task_handle
-                .as_ref()
-                .is_some_and(|h| !h.is_finished())
+        self.shutdown_tx.is_some() && self.task_handle.as_ref().is_some_and(|h| !h.is_finished())
     }
 
     /// Gracefully shuts down the watcher.

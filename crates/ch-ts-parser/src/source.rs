@@ -454,10 +454,7 @@ mod tests {
 
         // Edge case: paths like shared_2023/shared/models don't match either pattern
         // because they're not valid model paths (no shared_2023/models or shared/interfaces)
-        assert_eq!(
-            detect_model_source("'shared_2023/shared/models/foo'"),
-            None
-        );
+        assert_eq!(detect_model_source("'shared_2023/shared/models/foo'"), None);
     }
 
     #[test]
@@ -478,10 +475,7 @@ mod tests {
             extract_model_name("'../shared/interfaces'"),
             Some("interfaces")
         );
-        assert_eq!(
-            extract_model_name("'../shared/models/foo.ts'"),
-            Some("foo")
-        );
+        assert_eq!(extract_model_name("'../shared/models/foo.ts'"), Some("foo"));
         assert_eq!(extract_model_name("''"), None);
     }
 

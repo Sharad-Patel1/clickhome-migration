@@ -31,7 +31,7 @@
 //! ```
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{fx_hash_map_with_capacity, FxHashMap, FileInfo, MigrationStatus};
+use ch_core::{fx_hash_map_with_capacity, FileInfo, FxHashMap, MigrationStatus};
 use parking_lot::RwLock;
 
 /// A thread-safe cache for storing [`FileInfo`] results.
@@ -525,9 +525,6 @@ mod tests {
         cache.insert(file2);
 
         let retrieved = cache.get(&path);
-        assert_eq!(
-            retrieved.map(|f| f.status),
-            Some(MigrationStatus::Migrated)
-        );
+        assert_eq!(retrieved.map(|f| f.status), Some(MigrationStatus::Migrated));
     }
 }

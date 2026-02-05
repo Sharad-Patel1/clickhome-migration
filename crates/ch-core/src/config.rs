@@ -253,7 +253,6 @@ pub struct Config {
     pub editor: EditorConfig,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

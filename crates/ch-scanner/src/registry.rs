@@ -179,11 +179,7 @@ impl RegistryBuilder {
     ///
     /// Interface files typically contain many interface declarations and
     /// are treated as a single "interfaces" model in the registry.
-    fn parse_interfaces_file(
-        path: &Utf8Path,
-        source: ModelSource,
-        registry: &mut ModelRegistry,
-    ) {
+    fn parse_interfaces_file(path: &Utf8Path, source: ModelSource, registry: &mut ModelRegistry) {
         if !path.exists() {
             debug!(path = %path, "Interfaces file not found, skipping");
             return;
@@ -211,10 +207,7 @@ impl RegistryBuilder {
         }
 
         // Create a model definition for the interfaces file
-        let model_name = path
-            .file_stem()
-            .unwrap_or("interfaces")
-            .to_owned();
+        let model_name = path.file_stem().unwrap_or("interfaces").to_owned();
 
         let mut definition = ModelDefinition::new(model_name, source, path);
         for export in &exports {

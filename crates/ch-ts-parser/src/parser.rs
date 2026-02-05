@@ -289,10 +289,7 @@ impl TsParser {
     /// # Ok::<(), ch_ts_parser::ParseError>(())
     /// ```
     pub fn parse(&mut self, source: &str) -> Result<ParseResult, ParseError> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .ok_or(ParseError::Parse)?;
+        let tree = self.parser.parse(source, None).ok_or(ParseError::Parse)?;
 
         let query = self.get_query()?;
         let imports = extract_imports(&tree, source, query);
@@ -561,10 +558,7 @@ impl ArenaParser {
         arena: &'bump Bump,
         source: &str,
     ) -> Result<BumpParseResult<'bump>, ParseError> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .ok_or(ParseError::Parse)?;
+        let tree = self.parser.parse(source, None).ok_or(ParseError::Parse)?;
 
         let query = self.get_query()?;
         let imports = extract_imports_arena(arena, &tree, source, query);
