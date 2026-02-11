@@ -1,0 +1,15 @@
+[package]
+name = "ch-graph"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Dependency graph foundations for migration planning"
+
+[dependencies]
+petgraph.workspace = true
+
+[lints]
+workspace = true
