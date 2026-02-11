@@ -193,7 +193,10 @@ mod tests {
 
     #[test]
     fn test_resize_event() {
-        let event = Event::Resize { width: 120, height: 40 };
+        let event = Event::Resize {
+            width: 120,
+            height: 40,
+        };
         if let Event::Resize { width, height } = event {
             assert_eq!(width, 120);
             assert_eq!(height, 40);

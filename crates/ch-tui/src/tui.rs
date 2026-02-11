@@ -50,16 +50,16 @@
 use std::io::{self, Stdout};
 use std::time::Duration;
 
-use crossterm::ExecutableCommand;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     EventStream, KeyEventKind,
 };
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::Terminal;
+use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
+use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -318,12 +318,17 @@ impl Tui {
         match event {
             CrosstermEvent::Key(key) => {
                 // Only handle key press events, not release
-                if key.kind == KeyEventKind::Press { Some(Event::Key(*key)) } else { None }
+                if key.kind == KeyEventKind::Press {
+                    Some(Event::Key(*key))
+                } else {
+                    None
+                }
             }
             CrosstermEvent::Mouse(mouse) => Some(Event::Mouse(*mouse)),
-            CrosstermEvent::Resize(width, height) => {
-                Some(Event::Resize { width: *width, height: *height })
-            }
+            CrosstermEvent::Resize(width, height) => Some(Event::Resize {
+                width: *width,
+                height: *height,
+            }),
             CrosstermEvent::FocusGained => Some(Event::FocusGained),
             CrosstermEvent::FocusLost => Some(Event::FocusLost),
             CrosstermEvent::Paste(_) => None, // Not handling paste events currently

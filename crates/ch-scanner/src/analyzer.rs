@@ -51,17 +51,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelRegistry, ModelSource};
-use ch_ts_parser::{ArenaParser, ModelPathMatcher, detect_model_source_with};
+use ch_ts_parser::{detect_model_source_with, ArenaParser, ModelPathMatcher};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
 
-use crate::ScanUpdate;
 use crate::cache::ScanCache;
 use crate::error::ScanError;
 use crate::stats::ScanStats;
+use crate::ScanUpdate;
 
 /// Parallel file analyzer using rayon and per-thread arenas.
 ///
@@ -257,8 +257,10 @@ impl FileAnalyzer {
                         errors.lock().push((path.clone(), e.clone()));
 
                         // Send error update (ignore if receiver dropped)
-                        let _ = sender
-                            .blocking_send(ScanUpdate::FileError { path: path.clone(), error: e });
+                        let _ = sender.blocking_send(ScanUpdate::FileError {
+                            path: path.clone(),
+                            error: e,
+                        });
                     }
                 }
             },
@@ -296,8 +298,12 @@ impl FileAnalyzer {
         let arena = bumpalo::Bump::new();
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
 
-        let mut parser = if is_tsx { ArenaParser::new_tsx() } else { ArenaParser::new() }
-            .map_err(|e| ScanError::parse(path, e))?;
+        let mut parser = if is_tsx {
+            ArenaParser::new_tsx()
+        } else {
+            ArenaParser::new()
+        }
+        .map_err(|e| ScanError::parse(path, e))?;
 
         self.analyze_file_inner(path, Some(&mut parser), None, &arena, matcher, registry)
     }
@@ -325,15 +331,20 @@ impl FileAnalyzer {
 
         // Select parser based on extension
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
-        let parser = if is_tsx { tsx_parser.or(ts_parser) } else { ts_parser.or(tsx_parser) };
+        let parser = if is_tsx {
+            tsx_parser.or(ts_parser)
+        } else {
+            ts_parser.or(tsx_parser)
+        };
 
         let Some(parser) = parser else {
             return Err(ScanError::config("no parser available"));
         };
 
         // Parse the file
-        let parse_result =
-            parser.parse_with_arena(arena, &contents).map_err(|e| ScanError::parse(path, e))?;
+        let parse_result = parser
+            .parse_with_arena(arena, &contents)
+            .map_err(|e| ScanError::parse(path, e))?;
 
         // Convert imports to owned and calculate status
         let mut imports: SmallVec<[ImportInfo; 8]> = parse_result
@@ -349,11 +360,17 @@ impl FileAnalyzer {
                 // If we have a registry, validate that at least one imported name
                 // is a known model export from the detected source
                 if let Some(reg) = registry {
-                    let has_model_export =
-                        import.names.iter().any(|name| reg.is_export_from(name, detected_source));
+                    let has_model_export = import
+                        .names
+                        .iter()
+                        .any(|name| reg.is_export_from(name, detected_source));
 
                     // Only mark as model import if it has actual model exports
-                    import.source = if has_model_export { Some(detected_source) } else { None };
+                    import.source = if has_model_export {
+                        Some(detected_source)
+                    } else {
+                        None
+                    };
                 } else {
                     // No registry - use path-based detection only
                     import.source = Some(detected_source);
@@ -366,8 +383,10 @@ impl FileAnalyzer {
         let status = determine_status(&imports);
 
         // Get current timestamp
-        let last_scanned =
-            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let last_scanned = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
         Ok(FileInfo {
             id: file_id,
@@ -449,13 +468,19 @@ mod tests {
 
     #[test]
     fn test_determine_status_legacy() {
-        let imports = vec![make_import(Some(ModelSource::SharedLegacy)), make_import(None)];
+        let imports = vec![
+            make_import(Some(ModelSource::SharedLegacy)),
+            make_import(None),
+        ];
         assert_eq!(determine_status(&imports), MigrationStatus::Legacy);
     }
 
     #[test]
     fn test_determine_status_migrated() {
-        let imports = vec![make_import(Some(ModelSource::Shared2023)), make_import(None)];
+        let imports = vec![
+            make_import(Some(ModelSource::Shared2023)),
+            make_import(None),
+        ];
         assert_eq!(determine_status(&imports), MigrationStatus::Migrated);
     }
 

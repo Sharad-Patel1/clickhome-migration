@@ -111,13 +111,17 @@ impl ScanConfig {
     /// Returns the legacy shared directory name for import matching.
     #[must_use]
     pub fn shared_dir_name(&self) -> &str {
-        self.shared_path.file_name().unwrap_or(self.shared_dir.as_str())
+        self.shared_path
+            .file_name()
+            .unwrap_or(self.shared_dir.as_str())
     }
 
     /// Returns the `shared_2023` directory name for import matching.
     #[must_use]
     pub fn shared_2023_dir_name(&self) -> &str {
-        self.shared_2023_path.file_name().unwrap_or(self.shared_2023_dir.as_str())
+        self.shared_2023_path
+            .file_name()
+            .unwrap_or(self.shared_2023_dir.as_str())
     }
 }
 
@@ -152,7 +156,11 @@ pub struct WatchConfig {
 
 impl Default for WatchConfig {
     fn default() -> Self {
-        Self { enabled: true, debounce_ms: 100, recursive: true }
+        Self {
+            enabled: true,
+            debounce_ms: 100,
+            recursive: true,
+        }
     }
 }
 
@@ -299,8 +307,17 @@ mod tests {
 
     #[test]
     fn test_color_scheme_serialization() {
-        assert_eq!(serde_json::to_string(&ColorScheme::Auto).unwrap(), r#""auto""#);
-        assert_eq!(serde_json::to_string(&ColorScheme::Dark).unwrap(), r#""dark""#);
-        assert_eq!(serde_json::to_string(&ColorScheme::Light).unwrap(), r#""light""#);
+        assert_eq!(
+            serde_json::to_string(&ColorScheme::Auto).unwrap(),
+            r#""auto""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ColorScheme::Dark).unwrap(),
+            r#""dark""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ColorScheme::Light).unwrap(),
+            r#""light""#
+        );
     }
 }

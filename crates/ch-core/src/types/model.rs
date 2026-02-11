@@ -246,7 +246,11 @@ impl ModelReference {
     #[inline]
     #[must_use]
     pub fn new(name: impl Into<String>, category: ModelCategory, source: ModelSource) -> Self {
-        Self { name: name.into(), category, source }
+        Self {
+            name: name.into(),
+            category,
+            source,
+        }
     }
 
     /// Returns `true` if this reference is from the legacy source.
@@ -503,13 +507,15 @@ impl ModelRegistry {
                 for export in &definition.exports {
                     self.legacy_exports.insert(export.clone());
                 }
-                self.legacy_models.insert(definition.name.clone(), definition);
+                self.legacy_models
+                    .insert(definition.name.clone(), definition);
             }
             ModelSource::Shared2023 => {
                 for export in &definition.exports {
                     self.modern_exports.insert(export.clone());
                 }
-                self.modern_models.insert(definition.name.clone(), definition);
+                self.modern_models
+                    .insert(definition.name.clone(), definition);
             }
         }
     }
@@ -654,7 +660,9 @@ impl ModelRegistry {
 
     /// Returns an iterator over all model definitions.
     pub fn iter_all_models(&self) -> impl Iterator<Item = &ModelDefinition> {
-        self.legacy_models.values().chain(self.modern_models.values())
+        self.legacy_models
+            .values()
+            .chain(self.modern_models.values())
     }
 
     /// Returns a legacy model definition by name, if it exists.
@@ -701,7 +709,10 @@ mod tests {
             serde_json::to_string(&ModelSource::SharedLegacy).unwrap(),
             r#""shared_legacy""#
         );
-        assert_eq!(serde_json::to_string(&ModelSource::Shared2023).unwrap(), r#""shared2023""#);
+        assert_eq!(
+            serde_json::to_string(&ModelSource::Shared2023).unwrap(),
+            r#""shared2023""#
+        );
     }
 
     #[test]
@@ -820,7 +831,11 @@ mod tests {
             name: "Foo".to_owned(),
             source: ModelSource::SharedLegacy,
             definition_path: "shared/models/foo.ts".into(),
-            exports: smallvec!["Foo".to_owned(), "FooModel".to_owned(), "FooCodeGen".to_owned()],
+            exports: smallvec![
+                "Foo".to_owned(),
+                "FooModel".to_owned(),
+                "FooCodeGen".to_owned()
+            ],
         };
         registry.register(definition);
 

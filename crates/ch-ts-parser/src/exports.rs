@@ -128,7 +128,12 @@ impl ExportInfo {
     /// Creates a new export info.
     #[must_use]
     pub fn new(name: impl Into<String>, kind: ExportKind, location: SourceLocation) -> Self {
-        Self { name: name.into(), kind, location, reexport_source: None }
+        Self {
+            name: name.into(),
+            kind,
+            location,
+            reexport_source: None,
+        }
     }
 
     /// Creates a new re-export info.
@@ -269,7 +274,10 @@ fn compile_export_query(language: &Language) -> Result<Query, crate::ParseError>
 pub fn extract_exports(tree: &Tree, source: &str, query: &Query) -> SmallVec<[ExportInfo; 16]> {
     let arena = Bump::new();
     let bump_exports = extract_exports_arena(&arena, tree, source, query);
-    bump_exports.into_iter().map(BumpExportInfo::into_owned).collect()
+    bump_exports
+        .into_iter()
+        .map(BumpExportInfo::into_owned)
+        .collect()
 }
 
 /// Extracts all exports using arena allocation for zero-copy during extraction.
@@ -404,7 +412,10 @@ fn node_to_location(node: Node<'_>) -> SourceLocation {
 #[must_use]
 pub fn kebab_to_pascal(kebab: &str) -> String {
     // Remove .ts or .tsx extension if present
-    let name = kebab.strip_suffix(".ts").or_else(|| kebab.strip_suffix(".tsx")).unwrap_or(kebab);
+    let name = kebab
+        .strip_suffix(".ts")
+        .or_else(|| kebab.strip_suffix(".tsx"))
+        .unwrap_or(kebab);
 
     let mut result = String::with_capacity(name.len());
     let mut capitalize_next = true;
@@ -457,7 +468,9 @@ mod tests {
     fn create_parser() -> Parser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-        parser.set_language(&language).expect("Failed to set language");
+        parser
+            .set_language(&language)
+            .expect("Failed to set language");
         parser
     }
 
@@ -534,7 +547,9 @@ mod tests {
 
         // Re-exports should have the source path
         assert!(exports.iter().all(|e| e.kind == ExportKind::ReExport));
-        assert!(exports.iter().all(|e| e.reexport_source.as_deref() == Some("'./foo'")));
+        assert!(exports
+            .iter()
+            .all(|e| e.reexport_source.as_deref() == Some("'./foo'")));
     }
 
     #[test]

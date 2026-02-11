@@ -53,7 +53,7 @@ use std::time::Duration;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use notify::RecursiveMode;
-use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -199,7 +199,14 @@ impl FileWatcher {
 
         // Spawn blocking task for notify
         let task_handle = tokio::task::spawn_blocking(move || {
-            run_watcher_loop(task_path, debounce_ms, recursive, event_tx, shutdown_rx, filter)
+            run_watcher_loop(
+                task_path,
+                debounce_ms,
+                recursive,
+                event_tx,
+                shutdown_rx,
+                filter,
+            )
         });
 
         Ok(Self {
@@ -243,7 +250,14 @@ impl FileWatcher {
         let recursive = config.recursive;
 
         let task_handle = tokio::task::spawn_blocking(move || {
-            run_watcher_loop(task_path, debounce_ms, recursive, event_tx, shutdown_rx, filter)
+            run_watcher_loop(
+                task_path,
+                debounce_ms,
+                recursive,
+                event_tx,
+                shutdown_rx,
+                filter,
+            )
         });
 
         Ok(Self {
@@ -430,7 +444,11 @@ fn run_watcher_loop<F: FileFilter>(
     let mut debouncer = debouncer_result?;
 
     // Configure recursive mode
-    let mode = if recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
+    let mode = if recursive {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
 
     // Start watching
     debouncer.watcher().watch(path.as_std_path(), mode)?;

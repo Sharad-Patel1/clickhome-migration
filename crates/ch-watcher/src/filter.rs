@@ -207,7 +207,8 @@ impl TypeScriptFilter {
 
     /// Checks if the file has a TypeScript extension.
     fn has_typescript_extension(&self, path: &Utf8Path) -> bool {
-        path.extension().is_some_and(|ext| self.extensions.contains(&ext))
+        path.extension()
+            .is_some_and(|ext| self.extensions.contains(&ext))
     }
 
     /// Checks if the file is a TypeScript declaration file.
@@ -219,7 +220,9 @@ impl TypeScriptFilter {
     /// Checks if the file matches any exclusion pattern.
     fn matches_exclusion_pattern(&self, path: &Utf8Path) -> bool {
         let path_str = path.as_str();
-        self.exclude_patterns.iter().any(|pattern| path_str.contains(pattern))
+        self.exclude_patterns
+            .iter()
+            .any(|pattern| path_str.contains(pattern))
     }
 }
 
@@ -278,19 +281,24 @@ impl ExtensionFilter {
     /// * `extensions` - The extensions to accept (without the leading dot)
     #[must_use]
     pub fn new(extensions: &[&str]) -> Self {
-        Self { extensions: extensions.iter().map(|s| (*s).to_owned()).collect() }
+        Self {
+            extensions: extensions.iter().map(|s| (*s).to_owned()).collect(),
+        }
     }
 
     /// Creates an extension filter from owned strings.
     #[must_use]
     pub fn from_owned(extensions: Vec<String>) -> Self {
-        Self { extensions: extensions.into_iter().collect() }
+        Self {
+            extensions: extensions.into_iter().collect(),
+        }
     }
 }
 
 impl FileFilter for ExtensionFilter {
     fn should_process(&self, path: &Utf8Path) -> bool {
-        path.extension().is_some_and(|ext| self.extensions.iter().any(|e| e == ext))
+        path.extension()
+            .is_some_and(|ext| self.extensions.iter().any(|e| e == ext))
     }
 }
 
@@ -329,7 +337,9 @@ impl CompositeFilter {
     /// An empty composite filter accepts all files.
     #[must_use]
     pub fn new() -> Self {
-        Self { filters: Vec::new() }
+        Self {
+            filters: Vec::new(),
+        }
     }
 
     /// Adds a filter to the composite.
@@ -473,7 +483,9 @@ mod tests {
             }
         }
 
-        let filter = CompositeFilter::new().and(TypeScriptFilter::default()).and(NoNodeModules);
+        let filter = CompositeFilter::new()
+            .and(TypeScriptFilter::default())
+            .and(NoNodeModules);
 
         assert!(filter.should_process(Utf8Path::new("src/app.ts")));
         assert!(!filter.should_process(Utf8Path::new("node_modules/pkg/index.ts")));

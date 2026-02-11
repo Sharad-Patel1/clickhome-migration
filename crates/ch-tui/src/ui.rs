@@ -21,9 +21,9 @@
 //! +------------------------------------------------------------------+
 //! ```
 
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Clear, Widget};
+use ratatui::Frame;
 
 use crate::app::{App, AppMode};
 use crate::components::{

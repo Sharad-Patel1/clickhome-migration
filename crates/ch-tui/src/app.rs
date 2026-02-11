@@ -85,7 +85,10 @@ impl ScanState {
     #[must_use]
     pub fn progress_percent(&self) -> Option<f64> {
         match self {
-            Self::Scanning { discovered, scanned } if *discovered > 0 =>
+            Self::Scanning {
+                discovered,
+                scanned,
+            } if *discovered > 0 =>
             {
                 #[allow(clippy::cast_precision_loss)]
                 Some((*scanned as f64 / *discovered as f64) * 100.0)
@@ -286,7 +289,11 @@ impl FileListState {
     pub fn set_filter(&mut self, indices: Option<Vec<usize>>) {
         self.filtered_indices = indices;
         // Reset selection when filter changes
-        self.selected = if self.filtered_indices.as_ref().is_some_and(|v| !v.is_empty()) {
+        self.selected = if self
+            .filtered_indices
+            .as_ref()
+            .is_some_and(|v| !v.is_empty())
+        {
             Some(0)
         } else {
             None
@@ -490,13 +497,21 @@ impl StatusMessage {
     /// Creates a new info message.
     #[must_use]
     pub fn info(text: impl Into<String>) -> Self {
-        Self { text: text.into(), timestamp: Instant::now(), is_error: false }
+        Self {
+            text: text.into(),
+            timestamp: Instant::now(),
+            is_error: false,
+        }
     }
 
     /// Creates a new error message.
     #[must_use]
     pub fn error(text: impl Into<String>) -> Self {
-        Self { text: text.into(), timestamp: Instant::now(), is_error: true }
+        Self {
+            text: text.into(),
+            timestamp: Instant::now(),
+            is_error: true,
+        }
     }
 
     /// Returns `true` if the message should be auto-hidden.
@@ -571,9 +586,15 @@ impl App {
     pub fn new(config: Config, scanner: Scanner) -> Self {
         let needs_setup = Self::requires_directory_setup(&config);
         let directory_setup = DirectorySetup::from_config(&config);
-        let mode = if needs_setup { AppMode::DirectorySetup } else { AppMode::Normal };
+        let mode = if needs_setup {
+            AppMode::DirectorySetup
+        } else {
+            AppMode::Normal
+        };
         let status = if needs_setup {
-            Some(StatusMessage::info("Select directories and press Enter to apply"))
+            Some(StatusMessage::info(
+                "Select directories and press Enter to apply",
+            ))
         } else {
             None
         };
@@ -792,7 +813,10 @@ impl App {
             Action::CycleSortMode => {
                 self.sort_mode = self.sort_mode.cycle();
                 self.sort_and_refresh_files();
-                self.status = Some(StatusMessage::info(format!("Sort: {}", self.sort_mode.label())));
+                self.status = Some(StatusMessage::info(format!(
+                    "Sort: {}",
+                    self.sort_mode.label()
+                )));
             }
 
             Action::Rescan => {
@@ -806,8 +830,11 @@ impl App {
             }
 
             Action::ToggleHelp => {
-                self.mode =
-                    if self.mode == AppMode::Help { AppMode::Normal } else { AppMode::Help };
+                self.mode = if self.mode == AppMode::Help {
+                    AppMode::Normal
+                } else {
+                    AppMode::Help
+                };
             }
             Action::ShowHelp => {
                 self.mode = AppMode::Help;
@@ -875,7 +902,10 @@ impl App {
         match update {
             ScanUpdate::PathsDiscovered(count) => {
                 debug!(count, "Paths discovered");
-                self.scan_state = ScanState::Scanning { discovered: count, scanned: 0 };
+                self.scan_state = ScanState::Scanning {
+                    discovered: count,
+                    scanned: 0,
+                };
                 // Pre-allocate storage for efficiency
                 self.files.reserve(count);
                 self.status = Some(StatusMessage::info(format!("Scanning {count} files...")));
@@ -892,7 +922,11 @@ impl App {
                 self.files_dirty = true;
 
                 // Update progress counter
-                if let ScanState::Scanning { discovered, ref mut scanned } = self.scan_state {
+                if let ScanState::Scanning {
+                    discovered,
+                    ref mut scanned,
+                } = self.scan_state
+                {
                     *scanned += 1;
                     // Update status message periodically (every 100 files)
                     if *scanned % 100 == 0 {
@@ -917,8 +951,10 @@ impl App {
                 self.stats = result.stats;
                 // Force sort and apply filters
                 self.sort_and_refresh_files();
-                self.status =
-                    Some(StatusMessage::info(format!("Scanned {} files", self.stats.total)));
+                self.status = Some(StatusMessage::info(format!(
+                    "Scanned {} files",
+                    self.stats.total
+                )));
             }
         }
     }
@@ -941,7 +977,9 @@ impl App {
     /// when no names are present.
     #[must_use]
     pub fn legacy_remaining_count(file: &FileInfo) -> usize {
-        file.legacy_imports().map(|import| import.names.len().max(1)).sum()
+        file.legacy_imports()
+            .map(|import| import.names.len().max(1))
+            .sum()
     }
 
     /// Sorts files in place according to the current sort mode.
@@ -1032,8 +1070,11 @@ impl App {
         }
 
         self.rebuild_scanner()?;
-        self.pending_watcher_restart =
-            if self.config.watch.enabled { Some(self.config.scan.root_path.clone()) } else { None };
+        self.pending_watcher_restart = if self.config.watch.enabled {
+            Some(self.config.scan.root_path.clone())
+        } else {
+            None
+        };
 
         if let Err(e) = self.rescan() {
             self.status = Some(StatusMessage::error(format!("Rescan failed: {e}")));
@@ -1048,7 +1089,11 @@ impl App {
         let shared = parse_dir_input("shared", &self.directory_setup.shared_input)?;
         let shared_2023 = parse_dir_input("shared_2023", &self.directory_setup.shared_2023_input)?;
 
-        Ok(DirectoryPaths { root, shared, shared_2023 })
+        Ok(DirectoryPaths {
+            root,
+            shared,
+            shared_2023,
+        })
     }
 
     fn rebuild_scanner(&mut self) -> Result<(), TuiError> {
@@ -1182,7 +1227,11 @@ impl App {
             .map(|idx| self.file_list_state.actual_index(idx))
             .and_then(|idx| self.files.get(idx));
 
-        (selected_file, self.focus == Focus::DetailPane, &mut self.detail_state)
+        (
+            selected_file,
+            self.focus == Focus::DetailPane,
+            &mut self.detail_state,
+        )
     }
 
     /// Returns all files (for rendering).
@@ -1268,7 +1317,9 @@ fn parse_dir_input(label: &str, input: &str) -> Result<Utf8PathBuf, TuiError> {
         return Err(TuiError::config(format!("{label} path not found: {path}")));
     }
     if !path.is_dir() {
-        return Err(TuiError::config(format!("{label} path is not a directory: {path}")));
+        return Err(TuiError::config(format!(
+            "{label} path is not a directory: {path}"
+        )));
     }
 
     Ok(path)
@@ -1281,16 +1332,12 @@ fn is_valid_dir(path: &Utf8PathBuf) -> bool {
 fn sort_files_for_mode(files: &mut [FileInfo], sort_mode: SortMode) {
     files.sort_unstable_by(|a, b| match sort_mode {
         SortMode::PathAsc => a.path.cmp(&b.path),
-        SortMode::LegacyRemainingDesc => {
-            App::legacy_remaining_count(b)
-                .cmp(&App::legacy_remaining_count(a))
-                .then_with(|| a.path.cmp(&b.path))
-        }
-        SortMode::LegacyRemainingAsc => {
-            App::legacy_remaining_count(a)
-                .cmp(&App::legacy_remaining_count(b))
-                .then_with(|| a.path.cmp(&b.path))
-        }
+        SortMode::LegacyRemainingDesc => App::legacy_remaining_count(b)
+            .cmp(&App::legacy_remaining_count(a))
+            .then_with(|| a.path.cmp(&b.path)),
+        SortMode::LegacyRemainingAsc => App::legacy_remaining_count(a)
+            .cmp(&App::legacy_remaining_count(b))
+            .then_with(|| a.path.cmp(&b.path)),
     });
 }
 
@@ -1309,9 +1356,15 @@ struct ParsedTextFilter<'a> {
 impl<'a> ParsedTextFilter<'a> {
     fn parse(raw: &'a str) -> Self {
         if let Some(rest) = raw.strip_prefix('=') {
-            Self { mode: TextFilterMode::Exact, needle: rest.trim() }
+            Self {
+                mode: TextFilterMode::Exact,
+                needle: rest.trim(),
+            }
         } else {
-            Self { mode: TextFilterMode::Contains, needle: raw }
+            Self {
+                mode: TextFilterMode::Contains,
+                needle: raw,
+            }
         }
     }
 
@@ -1327,7 +1380,9 @@ fn contains_case_insensitive_ascii(haystack: &str, needle: &str) -> bool {
 
     let haystack = haystack.as_bytes();
     let needle = needle.as_bytes();
-    haystack.windows(needle.len()).any(|window| window.eq_ignore_ascii_case(needle))
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn matches_text(haystack: &str, query: ParsedTextFilter<'_>) -> bool {
@@ -1346,7 +1401,10 @@ fn import_matches_model_query(import: &ImportInfo, query: ParsedTextFilter<'_>) 
 fn file_matches_text_or_model(file: &FileInfo, query: ParsedTextFilter<'_>) -> bool {
     query.is_empty()
         || matches_text(file.path.as_str(), query)
-        || file.imports.iter().any(|import| import_matches_model_query(import, query))
+        || file
+            .imports
+            .iter()
+            .any(|import| import_matches_model_query(import, query))
 }
 
 fn file_matches_filters_parsed(
@@ -1360,7 +1418,11 @@ fn file_matches_filters_parsed(
 }
 
 #[cfg(test)]
-fn file_matches_filters(file: &FileInfo, query: &str, status_filter: Option<MigrationStatus>) -> bool {
+fn file_matches_filters(
+    file: &FileInfo,
+    query: &str,
+    status_filter: Option<MigrationStatus>,
+) -> bool {
     file_matches_filters_parsed(file, ParsedTextFilter::parse(query.trim()), status_filter)
 }
 
@@ -1376,13 +1438,16 @@ impl App {
 mod tests {
     use super::*;
     use ch_core::{FileId, ImportKind, ModelSource, SourceLocation};
-    use smallvec::{SmallVec, smallvec};
+    use smallvec::{smallvec, SmallVec};
 
     fn make_import(path: &str, source: Option<ModelSource>, names: &[&str]) -> ImportInfo {
         ImportInfo::new(
             path,
             ImportKind::Named,
-            names.iter().map(|name| (*name).to_owned()).collect::<SmallVec<[String; 4]>>(),
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<SmallVec<[String; 4]>>(),
             source,
             SourceLocation::default(),
         )
@@ -1431,13 +1496,21 @@ mod tests {
             "src/foo.ts",
             MigrationStatus::Legacy,
             smallvec![
-                make_import("../shared/models/order", Some(ModelSource::SharedLegacy), &["Order"]),
+                make_import(
+                    "../shared/models/order",
+                    Some(ModelSource::SharedLegacy),
+                    &["Order"]
+                ),
                 make_import(
                     "../shared/models/account",
                     Some(ModelSource::SharedLegacy),
                     &["Account", "AccountForm"]
                 ),
-                make_import("../shared/models/empty", Some(ModelSource::SharedLegacy), &[]),
+                make_import(
+                    "../shared/models/empty",
+                    Some(ModelSource::SharedLegacy),
+                    &[]
+                ),
                 make_import("@angular/core", None, &["Component"])
             ],
         );
@@ -1624,8 +1697,11 @@ mod tests {
 
     #[test]
     fn test_filter_path_match_only() {
-        let file =
-            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let file = make_file(
+            "src/features/orders.component.ts",
+            MigrationStatus::Legacy,
+            smallvec![],
+        );
 
         assert!(file_matches_filters(&file, "orders", None));
     }
@@ -1662,8 +1738,11 @@ mod tests {
 
     #[test]
     fn test_filter_exact_path_match_only() {
-        let file =
-            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let file = make_file(
+            "src/features/orders.component.ts",
+            MigrationStatus::Legacy,
+            smallvec![],
+        );
 
         assert!(file_matches_filters(
             &file,
@@ -1777,8 +1856,11 @@ mod tests {
 
     #[test]
     fn test_filter_case_insensitive_path_and_model() {
-        let path_file =
-            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let path_file = make_file(
+            "src/features/orders.component.ts",
+            MigrationStatus::Legacy,
+            smallvec![],
+        );
         let model_file = make_file(
             "src/foo.ts",
             MigrationStatus::Legacy,
