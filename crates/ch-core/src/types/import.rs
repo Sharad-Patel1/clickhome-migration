@@ -172,13 +172,7 @@ impl ImportInfo {
         source: Option<ModelSource>,
         location: SourceLocation,
     ) -> Self {
-        Self {
-            path: path.into(),
-            kind,
-            names,
-            source,
-            location,
-        }
+        Self { path: path.into(), kind, names, source, location }
     }
 
     /// Returns `true` if this import is from a shared model directory.

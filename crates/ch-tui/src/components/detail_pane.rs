@@ -39,11 +39,7 @@ impl<'a> DetailPane<'a> {
     /// Creates a new detail pane.
     #[must_use]
     pub const fn new(file: Option<&'a FileInfo>, focused: bool, theme: &'a Theme) -> Self {
-        Self {
-            file,
-            focused,
-            theme,
-        }
+        Self { file, focused, theme }
     }
 
     /// Renders the "no selection" placeholder.
@@ -55,35 +51,28 @@ impl<'a> DetailPane<'a> {
 
         let text = Text::from(vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "No file selected",
-                self.theme.dimmed_style(),
-            )),
+            Line::from(Span::styled("No file selected", self.theme.dimmed_style())),
             Line::from(""),
-            Line::from(Span::styled(
-                "Select a file from the list",
-                self.theme.dimmed_style(),
-            )),
-            Line::from(Span::styled(
-                "to view its details.",
-                self.theme.dimmed_style(),
-            )),
+            Line::from(Span::styled("Select a file from the list", self.theme.dimmed_style())),
+            Line::from(Span::styled("to view its details.", self.theme.dimmed_style())),
         ]);
 
-        let paragraph = Paragraph::new(text)
-            .block(block)
-            .alignment(ratatui::layout::Alignment::Center);
+        let paragraph =
+            Paragraph::new(text).block(block).alignment(ratatui::layout::Alignment::Center);
 
         paragraph.render(area, buf);
     }
 
     /// Renders the file details.
-    fn render_details(&self, file: &FileInfo, area: Rect, buf: &mut Buffer, state: &mut DetailPaneState) {
-        let border_style = if self.focused {
-            self.theme.focused_border_style
-        } else {
-            self.theme.border_style
-        };
+    fn render_details(
+        &self,
+        file: &FileInfo,
+        area: Rect,
+        buf: &mut Buffer,
+        state: &mut DetailPaneState,
+    ) {
+        let border_style =
+            if self.focused { self.theme.focused_border_style } else { self.theme.border_style };
 
         let block = Block::default()
             .borders(Borders::ALL)
@@ -102,9 +91,7 @@ impl<'a> DetailPane<'a> {
             Span::styled("File: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 file_name.to_owned(),
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
             ),
         ]));
 
@@ -117,10 +104,7 @@ impl<'a> DetailPane<'a> {
         // Status
         lines.push(Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                file.status.label(),
-                self.theme.status_style(file.status),
-            ),
+            Span::styled(file.status.label(), self.theme.status_style(file.status)),
         ]));
 
         // Separator
@@ -133,10 +117,7 @@ impl<'a> DetailPane<'a> {
         // Legacy imports
         let legacy_imports: Vec<_> = file.legacy_imports().collect();
         if legacy_imports.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "No legacy imports",
-                self.theme.dimmed_style(),
-            )));
+            lines.push(Line::from(Span::styled("No legacy imports", self.theme.dimmed_style())));
         } else {
             lines.push(Line::from(vec![
                 Span::styled("Legacy: ", Style::default().fg(Color::DarkGray)),
@@ -160,10 +141,7 @@ impl<'a> DetailPane<'a> {
         // Migrated imports
         let migrated_imports: Vec<_> = file.migrated_imports().collect();
         if migrated_imports.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "No migrated imports",
-                self.theme.dimmed_style(),
-            )));
+            lines.push(Line::from(Span::styled("No migrated imports", self.theme.dimmed_style())));
         } else {
             lines.push(Line::from(vec![
                 Span::styled("Migrated: ", Style::default().fg(Color::DarkGray)),
@@ -206,10 +184,7 @@ impl<'a> DetailPane<'a> {
                     Span::raw(" "),
                     Span::styled(model_ref.name.clone(), self.theme.base_style()),
                     Span::raw(" "),
-                    Span::styled(
-                        format!("[{}]", model_ref.source.dir_name()),
-                        source_style,
-                    ),
+                    Span::styled(format!("[{}]", model_ref.source.dir_name()), source_style),
                 ]));
             }
         }
@@ -228,9 +203,8 @@ impl<'a> DetailPane<'a> {
         #[allow(clippy::cast_possible_truncation)]
         let scroll_offset = state.scroll_offset as u16;
 
-        let paragraph = Paragraph::new(content)
-            .scroll((scroll_offset, 0))
-            .wrap(Wrap { trim: false });
+        let paragraph =
+            Paragraph::new(content).scroll((scroll_offset, 0)).wrap(Wrap { trim: false });
 
         paragraph.render(inner, buf);
 
@@ -246,10 +220,7 @@ impl<'a> DetailPane<'a> {
                 .viewport_content_length(inner.height as usize);
 
             scrollbar.render(
-                inner.inner(ratatui::layout::Margin {
-                    vertical: 1,
-                    horizontal: 0,
-                }),
+                inner.inner(ratatui::layout::Margin { vertical: 1, horizontal: 0 }),
                 buf,
                 &mut scrollbar_state,
             );

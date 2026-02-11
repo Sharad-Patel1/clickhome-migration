@@ -79,10 +79,7 @@ impl FileEvent {
     #[inline]
     #[must_use]
     pub fn new(path: Utf8PathBuf) -> Self {
-        Self {
-            path,
-            timestamp: Instant::now(),
-        }
+        Self { path, timestamp: Instant::now() }
     }
 
     /// Creates a new file event with a specific timestamp.
@@ -199,10 +196,7 @@ impl FileEventBatch {
     #[inline]
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            events: SmallVec::new(),
-            received_at: Instant::now(),
-        }
+        Self { events: SmallVec::new(), received_at: Instant::now() }
     }
 
     /// Creates a batch from a vector of events.
@@ -213,10 +207,7 @@ impl FileEventBatch {
     #[inline]
     #[must_use]
     pub fn from_events(events: impl IntoIterator<Item = FileEvent>) -> Self {
-        Self {
-            events: events.into_iter().collect(),
-            received_at: Instant::now(),
-        }
+        Self { events: events.into_iter().collect(), received_at: Instant::now() }
     }
 
     /// Adds an event to the batch.

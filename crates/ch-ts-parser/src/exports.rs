@@ -128,12 +128,7 @@ impl ExportInfo {
     /// Creates a new export info.
     #[must_use]
     pub fn new(name: impl Into<String>, kind: ExportKind, location: SourceLocation) -> Self {
-        Self {
-            name: name.into(),
-            kind,
-            location,
-            reexport_source: None,
-        }
+        Self { name: name.into(), kind, location, reexport_source: None }
     }
 
     /// Creates a new re-export info.
@@ -409,10 +404,7 @@ fn node_to_location(node: Node<'_>) -> SourceLocation {
 #[must_use]
 pub fn kebab_to_pascal(kebab: &str) -> String {
     // Remove .ts or .tsx extension if present
-    let name = kebab
-        .strip_suffix(".ts")
-        .or_else(|| kebab.strip_suffix(".tsx"))
-        .unwrap_or(kebab);
+    let name = kebab.strip_suffix(".ts").or_else(|| kebab.strip_suffix(".tsx")).unwrap_or(kebab);
 
     let mut result = String::with_capacity(name.len());
     let mut capitalize_next = true;

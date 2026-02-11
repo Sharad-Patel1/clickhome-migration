@@ -25,13 +25,11 @@
 
 use bumpalo::Bump;
 use ch_core::{FxHashMap, ImportInfo, SourceLocation};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, Tree};
 
-use crate::arena::{
-    create_dynamic_bump_import, BumpImportBuilder, BumpImportInfo, StringInterner,
-};
+use crate::arena::{BumpImportBuilder, BumpImportInfo, StringInterner, create_dynamic_bump_import};
 use crate::queries::{
     CAPTURE_IMPORT_DEFAULT_NAME, CAPTURE_IMPORT_DYNAMIC_SOURCE, CAPTURE_IMPORT_NAMED_NAME,
     CAPTURE_IMPORT_NAMESPACE_NAME, CAPTURE_IMPORT_SOURCE, CAPTURE_IMPORT_STATEMENT,
@@ -231,7 +229,11 @@ pub fn extract_imports_arena<'bump>(
                         let path = interner.intern(text);
                         let model_source = detect_model_source(path.as_str());
                         let location = node_to_location(node);
-                        dynamic_imports.push(create_dynamic_bump_import(path, model_source, location));
+                        dynamic_imports.push(create_dynamic_bump_import(
+                            path,
+                            model_source,
+                            location,
+                        ));
                     }
                 }
                 _ => {}
@@ -317,9 +319,7 @@ mod tests {
     fn create_parser() -> Parser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-        parser
-            .set_language(&language)
-            .expect("Failed to set language");
+        parser.set_language(&language).expect("Failed to set language");
         parser
     }
 
@@ -444,10 +444,7 @@ import '@angular/core';
 
         // Check that we have both legacy and new imports
         let legacy_count = imports.iter().filter(|i| i.is_legacy_import()).count();
-        let new_count = imports
-            .iter()
-            .filter(|i| i.source.is_some_and(|s| !s.is_legacy()))
-            .count();
+        let new_count = imports.iter().filter(|i| i.source.is_some_and(|s| !s.is_legacy())).count();
 
         assert_eq!(legacy_count, 1);
         assert_eq!(new_count, 1);
@@ -583,7 +580,8 @@ import { Other } from '@angular/core';
         let imports = extract_imports_arena(&arena, &tree, source, &query);
         assert_eq!(imports.len(), 3);
 
-        let legacy = imports.iter().find(|i| i.path.contains("shared/models")).expect("should have legacy");
+        let legacy =
+            imports.iter().find(|i| i.path.contains("shared/models")).expect("should have legacy");
         let new = imports.iter().find(|i| i.path.contains("shared_2023")).expect("should have new");
         let other = imports.iter().find(|i| i.path.contains("angular")).expect("should have other");
 

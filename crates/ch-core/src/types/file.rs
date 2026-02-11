@@ -262,9 +262,7 @@ impl FileInfo {
     /// Returns an iterator over migrated imports in this file.
     #[inline]
     pub fn migrated_imports(&self) -> impl Iterator<Item = &ImportInfo> {
-        self.imports
-            .iter()
-            .filter(|i| i.source.is_some_and(|s| !s.is_legacy()))
+        self.imports.iter().filter(|i| i.source.is_some_and(|s| !s.is_legacy()))
     }
 }
 

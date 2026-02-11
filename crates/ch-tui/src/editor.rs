@@ -30,10 +30,7 @@ struct EditorCommand {
 impl EditorCommand {
     fn with_wait_flag(mut self) -> Self {
         if matches!(self.kind, EditorKind::Cursor | EditorKind::VsCode)
-            && !self
-                .args
-                .iter()
-                .any(|arg| arg == "--wait" || arg == "-w")
+            && !self.args.iter().any(|arg| arg == "--wait" || arg == "-w")
         {
             self.args.push("--wait".to_owned());
         }
@@ -41,7 +38,11 @@ impl EditorCommand {
     }
 }
 
-fn location_args(kind: EditorKind, path: &Utf8Path, location: Option<SourceLocation>) -> Vec<String> {
+fn location_args(
+    kind: EditorKind,
+    path: &Utf8Path,
+    location: Option<SourceLocation>,
+) -> Vec<String> {
     let Some(location) = location.filter(|loc| loc.line > 0) else {
         return vec![path.to_string()];
     };
@@ -51,10 +52,9 @@ fn location_args(kind: EditorKind, path: &Utf8Path, location: Option<SourceLocat
 
     match kind {
         EditorKind::Cursor | EditorKind::VsCode => vec![format!("{}:{line}:{column}", path)],
-        EditorKind::Nvim | EditorKind::Vim => vec![
-            format!("+call cursor({line},{column})"),
-            path.to_string(),
-        ],
+        EditorKind::Nvim | EditorKind::Vim => {
+            vec![format!("+call cursor({line},{column})"), path.to_string()]
+        }
         EditorKind::Nano => vec![format!("+{line},{column}"), path.to_string()],
         EditorKind::Other => vec![path.to_string()],
     }
@@ -66,11 +66,7 @@ fn parse_editor_command(command: &str) -> Option<EditorCommand> {
     let args = parts.map(str::to_owned).collect::<Vec<_>>();
     let kind = editor_kind_from_program(&program);
 
-    Some(EditorCommand {
-        program,
-        args,
-        kind,
-    })
+    Some(EditorCommand { program, args, kind })
 }
 
 fn editor_kind_from_program(program: &str) -> EditorKind {
@@ -100,15 +96,7 @@ fn resolve_editor(config: &Config) -> Result<EditorCommand, TuiError> {
     } else if let Ok(editor) = env::var("EDITOR") {
         candidates.push(editor);
     } else {
-        candidates.extend([
-            "cursor",
-            "code",
-            "nvim",
-            "vim",
-            "nano",
-        ]
-        .into_iter()
-        .map(str::to_owned));
+        candidates.extend(["cursor", "code", "nvim", "vim", "nano"].into_iter().map(str::to_owned));
     }
 
     for candidate in candidates {
@@ -117,9 +105,7 @@ fn resolve_editor(config: &Config) -> Result<EditorCommand, TuiError> {
         }
     }
 
-    Err(TuiError::config(
-        "No editor configured. Set --editor, $VISUAL, or $EDITOR.",
-    ))
+    Err(TuiError::config("No editor configured. Set --editor, $VISUAL, or $EDITOR."))
 }
 
 fn resolve_absolute_path(path: &Utf8Path, root: &Utf8Path) -> Utf8PathBuf {
@@ -174,9 +160,7 @@ pub fn run_editor(
         if status.success() {
             Ok(())
         } else {
-            Err(TuiError::config(format!(
-                "Editor exited with status: {status}"
-            )))
+            Err(TuiError::config(format!("Editor exited with status: {status}")))
         }
     })();
 

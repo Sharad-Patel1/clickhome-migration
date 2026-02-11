@@ -23,83 +23,24 @@ struct KeyBinding {
 /// Static list of key bindings to display.
 const KEY_BINDINGS: &[KeyBinding] = &[
     // Navigation
-    KeyBinding {
-        key: "j / ↓",
-        description: "Next file",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "k / ↑",
-        description: "Previous file",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "g / Home",
-        description: "Go to first file",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "G / End",
-        description: "Go to last file",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "PgDn / PgUp",
-        description: "Page down / up",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "Tab",
-        description: "Toggle focus (List/Details)",
-        mode: "Normal",
-    },
+    KeyBinding { key: "j / ↓", description: "Next file", mode: "Normal" },
+    KeyBinding { key: "k / ↑", description: "Previous file", mode: "Normal" },
+    KeyBinding { key: "g / Home", description: "Go to first file", mode: "Normal" },
+    KeyBinding { key: "G / End", description: "Go to last file", mode: "Normal" },
+    KeyBinding { key: "PgDn / PgUp", description: "Page down / up", mode: "Normal" },
+    KeyBinding { key: "Tab", description: "Toggle focus (List/Details)", mode: "Normal" },
     // Filtering
-    KeyBinding {
-        key: "/",
-        description: "Start filter mode",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "f",
-        description: "Cycle status filter",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "Esc",
-        description: "Clear filter / Exit mode",
-        mode: "Filter/Help",
-    },
-    KeyBinding {
-        key: "Enter",
-        description: "Confirm filter",
-        mode: "Filter",
-    },
+    KeyBinding { key: "/", description: "Filter path/model (= exact)", mode: "Normal" },
+    KeyBinding { key: "f", description: "Cycle status filter", mode: "Normal" },
+    KeyBinding { key: "s", description: "Cycle sort mode", mode: "Normal" },
+    KeyBinding { key: "Esc", description: "Clear filter / Exit mode", mode: "Filter/Help" },
+    KeyBinding { key: "Enter", description: "Confirm filter", mode: "Filter" },
     // Actions
-    KeyBinding {
-        key: "r",
-        description: "Rescan all files",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "o",
-        description: "Open file in editor",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "d",
-        description: "Configure directories",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "?",
-        description: "Toggle help panel",
-        mode: "Normal",
-    },
-    KeyBinding {
-        key: "q / Ctrl+c",
-        description: "Quit",
-        mode: "Any",
-    },
+    KeyBinding { key: "r", description: "Rescan all files", mode: "Normal" },
+    KeyBinding { key: "o", description: "Open file in editor", mode: "Normal" },
+    KeyBinding { key: "d", description: "Configure directories", mode: "Normal" },
+    KeyBinding { key: "?", description: "Toggle help panel", mode: "Normal" },
+    KeyBinding { key: "q / Ctrl+c", description: "Quit", mode: "Any" },
 ];
 
 /// A help panel overlay widget.
@@ -125,18 +66,10 @@ impl<'a> HelpPanel<'a> {
                 Row::new(vec![
                     Cell::from(Span::styled(
                         binding.key,
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                     )),
-                    Cell::from(Span::styled(
-                        binding.description,
-                        self.theme.base_style(),
-                    )),
-                    Cell::from(Span::styled(
-                        binding.mode,
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Cell::from(Span::styled(binding.description, self.theme.base_style())),
+                    Cell::from(Span::styled(binding.mode, Style::default().fg(Color::DarkGray))),
                 ])
             })
             .collect()
@@ -154,9 +87,7 @@ impl Widget for &HelpPanel<'_> {
             .border_style(self.theme.focused_border_style)
             .title(Span::styled(
                 " Help - Key Bindings ",
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
             ))
             .style(Style::default().bg(Color::Rgb(25, 25, 35)));
 
@@ -188,11 +119,7 @@ impl Widget for &HelpPanel<'_> {
         let rows = self.build_rows();
 
         // Column widths
-        let widths = [
-            Constraint::Length(15),
-            Constraint::Min(25),
-            Constraint::Length(12),
-        ];
+        let widths = [Constraint::Length(15), Constraint::Min(25), Constraint::Length(12)];
 
         // Build table
         let table = Table::new(rows, widths)

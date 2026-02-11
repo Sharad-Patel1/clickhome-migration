@@ -37,7 +37,7 @@ use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{ModelDefinition, ModelRegistry, ModelSource};
-use ch_ts_parser::{extract_exports, get_typescript_export_query, kebab_to_pascal, ExportInfo};
+use ch_ts_parser::{ExportInfo, extract_exports, get_typescript_export_query, kebab_to_pascal};
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use tracing::{debug, info, warn};
@@ -82,10 +82,7 @@ impl RegistryBuilder {
     /// * `shared_2023_path` - Path to the modern `shared_2023/` directory
     #[must_use]
     pub fn new(shared_path: &Utf8Path, shared_2023_path: &Utf8Path) -> Self {
-        Self {
-            shared_path: shared_path.to_owned(),
-            shared_2023_path: shared_2023_path.to_owned(),
-        }
+        Self { shared_path: shared_path.to_owned(), shared_2023_path: shared_2023_path.to_owned() }
     }
 
     /// Creates a new registry builder, inferring paths from a root directory.
@@ -98,10 +95,7 @@ impl RegistryBuilder {
     /// * `root` - Root directory containing shared subdirectories
     #[must_use]
     pub fn from_root(root: &Utf8Path) -> Self {
-        Self {
-            shared_path: root.join("shared"),
-            shared_2023_path: root.join("shared_2023"),
-        }
+        Self { shared_path: root.join("shared"), shared_2023_path: root.join("shared_2023") }
     }
 
     /// Builds the model registry by scanning all model definition files.
@@ -179,11 +173,7 @@ impl RegistryBuilder {
     ///
     /// Interface files typically contain many interface declarations and
     /// are treated as a single "interfaces" model in the registry.
-    fn parse_interfaces_file(
-        path: &Utf8Path,
-        source: ModelSource,
-        registry: &mut ModelRegistry,
-    ) {
+    fn parse_interfaces_file(path: &Utf8Path, source: ModelSource, registry: &mut ModelRegistry) {
         if !path.exists() {
             debug!(path = %path, "Interfaces file not found, skipping");
             return;
@@ -211,10 +201,7 @@ impl RegistryBuilder {
         }
 
         // Create a model definition for the interfaces file
-        let model_name = path
-            .file_stem()
-            .unwrap_or("interfaces")
-            .to_owned();
+        let model_name = path.file_stem().unwrap_or("interfaces").to_owned();
 
         let mut definition = ModelDefinition::new(model_name, source, path);
         for export in &exports {
@@ -244,11 +231,7 @@ impl RegistryBuilder {
         let entries: Vec<_> = match fs::read_dir(dir.as_std_path()) {
             Ok(entries) => entries
                 .filter_map(Result::ok)
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "ts" || ext == "tsx")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts" || ext == "tsx"))
                 .collect(),
             Err(e) => {
                 warn!(dir = %dir, error = %e, "Failed to read models directory");
@@ -275,10 +258,7 @@ impl RegistryBuilder {
                 }
 
                 // Derive model name from filename
-                let model_name = utf8_path
-                    .file_stem()
-                    .map(kebab_to_pascal)
-                    .unwrap_or_default();
+                let model_name = utf8_path.file_stem().map(kebab_to_pascal).unwrap_or_default();
 
                 if model_name.is_empty() {
                     return None;
@@ -313,9 +293,7 @@ impl RegistryBuilder {
             ch_ts_parser::TsParser::new().map_err(|e| ScanError::config(e.to_string()))?;
 
         // Parse to get the tree - we only need the tree for export extraction
-        let parse_result = parser
-            .parse(source)
-            .map_err(|e| ScanError::config(e.to_string()))?;
+        let parse_result = parser.parse(source).map_err(|e| ScanError::config(e.to_string()))?;
 
         Ok(extract_exports(&parse_result.tree, source, query))
     }
@@ -356,10 +334,7 @@ mod tests {
     fn test_registry_builder_from_root() {
         let builder = RegistryBuilder::from_root(Utf8Path::new("/app/src"));
         assert_eq!(builder.shared_path, Utf8PathBuf::from("/app/src/shared"));
-        assert_eq!(
-            builder.shared_2023_path,
-            Utf8PathBuf::from("/app/src/shared_2023")
-        );
+        assert_eq!(builder.shared_2023_path, Utf8PathBuf::from("/app/src/shared_2023"));
     }
 
     #[test]
@@ -369,10 +344,7 @@ mod tests {
             Utf8Path::new("/custom/shared_2023"),
         );
         assert_eq!(builder.shared_path, Utf8PathBuf::from("/custom/shared"));
-        assert_eq!(
-            builder.shared_2023_path,
-            Utf8PathBuf::from("/custom/shared_2023")
-        );
+        assert_eq!(builder.shared_2023_path, Utf8PathBuf::from("/custom/shared_2023"));
     }
 
     #[test]

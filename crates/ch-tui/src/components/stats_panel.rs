@@ -30,12 +30,12 @@ pub struct StatsPanel<'a> {
 impl<'a> StatsPanel<'a> {
     /// Creates a new stats panel.
     #[must_use]
-    pub const fn new(stats: &'a StatsSnapshot, scan_state: &'a ScanState, theme: &'a Theme) -> Self {
-        Self {
-            stats,
-            scan_state,
-            theme,
-        }
+    pub const fn new(
+        stats: &'a StatsSnapshot,
+        scan_state: &'a ScanState,
+        theme: &'a Theme,
+    ) -> Self {
+        Self { stats, scan_state, theme }
     }
 }
 
@@ -66,24 +66,14 @@ impl Widget for &StatsPanel<'_> {
 }
 
 /// Renders the scanning progress view.
-fn render_scanning_progress(
-    discovered: usize,
-    scanned: usize,
-    chunks: &[Rect],
-    buf: &mut Buffer,
-) {
+fn render_scanning_progress(discovered: usize, scanned: usize, chunks: &[Rect], buf: &mut Buffer) {
     // Scanning status text
     let scanning_line = Line::from(vec![
         Span::styled(
             "Scanning... ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!("{scanned}/{discovered} files"),
-            Style::default().fg(Color::White),
-        ),
+        Span::styled(format!("{scanned}/{discovered} files"), Style::default().fg(Color::White)),
     ]);
 
     let status_paragraph = Paragraph::new(scanning_line);
@@ -106,37 +96,20 @@ fn render_scanning_progress(
 }
 
 /// Renders the normal migration statistics view.
-fn render_migration_stats(
-    stats: &StatsSnapshot,
-    chunks: &[Rect],
-    buf: &mut Buffer,
-    theme: &Theme,
-) {
+fn render_migration_stats(stats: &StatsSnapshot, chunks: &[Rect], buf: &mut Buffer, theme: &Theme) {
     // Render stats counts
     let stats_line = Line::from(vec![
         Span::styled("Legacy: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{}", stats.legacy),
-            Style::default().fg(theme.legacy_fg),
-        ),
+        Span::styled(format!("{}", stats.legacy), Style::default().fg(theme.legacy_fg)),
         Span::raw(" │ "),
         Span::styled("Partial: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{}", stats.partial),
-            Style::default().fg(theme.partial_fg),
-        ),
+        Span::styled(format!("{}", stats.partial), Style::default().fg(theme.partial_fg)),
         Span::raw(" │ "),
         Span::styled("Migrated: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{}", stats.migrated),
-            Style::default().fg(theme.migrated_fg),
-        ),
+        Span::styled(format!("{}", stats.migrated), Style::default().fg(theme.migrated_fg)),
         Span::raw(" │ "),
         Span::styled("No Models: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{}", stats.no_models),
-            Style::default().fg(theme.no_models_fg),
-        ),
+        Span::styled(format!("{}", stats.no_models), Style::default().fg(theme.no_models_fg)),
     ]);
 
     let stats_paragraph = Paragraph::new(stats_line);
@@ -148,11 +121,7 @@ fn render_migration_stats(
     let progress_u16 = stats.progress_percent().round() as u16;
 
     let gauge = Gauge::default()
-        .gauge_style(
-            Style::default()
-                .fg(theme.migrated_fg)
-                .bg(Color::DarkGray),
-        )
+        .gauge_style(Style::default().fg(theme.migrated_fg).bg(Color::DarkGray))
         .percent(progress_u16)
         .label(format!("{:.1}%", stats.progress_percent()));
 

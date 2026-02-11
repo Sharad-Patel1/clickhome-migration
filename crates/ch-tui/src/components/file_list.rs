@@ -5,12 +5,13 @@
 use ch_core::FileInfo;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Rect};
+use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::{
     Block, Borders, Cell, HighlightSpacing, Row, StatefulWidget, Table, TableState,
 };
 
-use crate::app::{FileListState, FilterState};
+use crate::app::{App, FileListState};
 use crate::theme::Theme;
 
 /// A stateful file list widget.
@@ -24,8 +25,8 @@ use crate::theme::Theme;
 pub struct FileListView<'a> {
     /// The list of files to display.
     files: &'a [FileInfo],
-    /// Current filter state for highlighting.
-    filter: &'a FilterState,
+    /// Whether any filter is currently active.
+    filter_active: bool,
     /// Whether this widget has focus.
     focused: bool,
     /// Theme for styling.
@@ -37,25 +38,18 @@ impl<'a> FileListView<'a> {
     #[must_use]
     pub const fn new(
         files: &'a [FileInfo],
-        filter: &'a FilterState,
+        filter_active: bool,
         focused: bool,
         theme: &'a Theme,
     ) -> Self {
-        Self {
-            files,
-            filter,
-            focused,
-            theme,
-        }
+        Self { files, filter_active, focused, theme }
     }
 
     /// Builds rows for the table from the file list.
     fn build_rows(&self, state: &FileListState) -> Vec<Row<'a>> {
         let indices = state.filtered_indices();
-        let file_indices: Vec<usize> = indices.map_or_else(
-            || (0..self.files.len()).collect(),
-            <[usize]>::to_vec,
-        );
+        let file_indices: Vec<usize> =
+            indices.map_or_else(|| (0..self.files.len()).collect(), <[usize]>::to_vec);
 
         file_indices
             .into_iter()
@@ -74,18 +68,19 @@ impl<'a> FileListView<'a> {
 
         // Truncate long paths
         let path_display = truncate_path(file.path.as_str(), 60);
+        let remaining = App::legacy_remaining_count(file);
+        let remaining_style = if remaining > 0 {
+            Style::default().fg(self.theme.legacy_fg)
+        } else {
+            self.theme.dimmed_style()
+        };
 
         // Build cells
         let cells = vec![
             Cell::from(Span::styled(status_indicator, status_style)),
-            Cell::from(Span::styled(
-                path_display,
-                self.theme.base_style(),
-            )),
-            Cell::from(Span::styled(
-                file.status.label(),
-                status_style,
-            )),
+            Cell::from(Span::styled(path_display, self.theme.base_style())),
+            Cell::from(Span::styled(remaining.to_string(), remaining_style)),
+            Cell::from(Span::styled(file.status.label(), status_style)),
         ];
 
         Row::new(cells).height(1)
@@ -101,17 +96,11 @@ impl StatefulWidget for &FileListView<'_> {
         state.visible_height = inner_height as usize;
 
         // Border style based on focus
-        let border_style = if self.focused {
-            self.theme.focused_border_style
-        } else {
-            self.theme.border_style
-        };
+        let border_style =
+            if self.focused { self.theme.focused_border_style } else { self.theme.border_style };
 
-        let title = if self.filter.is_active() {
-            format!(
-                " Files ({} filtered) ",
-                state.len(self.files.len())
-            )
+        let title = if self.filter_active {
+            format!(" Files ({} filtered) ", state.len(self.files.len()))
         } else {
             format!(" Files ({}) ", self.files.len())
         };
@@ -127,7 +116,8 @@ impl StatefulWidget for &FileListView<'_> {
         // Column widths
         let widths = [
             Constraint::Length(4),  // Status indicator
-            Constraint::Min(30),    // Path
+            Constraint::Min(22),    // Path
+            Constraint::Length(10), // Legacy remaining
             Constraint::Length(12), // Status label
         ];
 
@@ -145,6 +135,10 @@ impl StatefulWidget for &FileListView<'_> {
 
         // Render the table
         StatefulWidget::render(table, area, buf, &mut table_state);
+
+        // Persist any render-time clamping/offset changes back to app state.
+        state.selected = table_state.selected();
+        state.scroll_offset = table_state.offset();
     }
 }
 

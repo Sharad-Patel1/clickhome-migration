@@ -22,6 +22,7 @@
 #![warn(missing_docs)]
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
@@ -29,7 +30,8 @@ use ch_scanner::{ScanConfig as ScannerConfig, Scanner, StatsSnapshot};
 use ch_ts_parser::ModelPathMatcher;
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing::info;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 // =============================================================================
 // CLI ARGUMENT TYPES
@@ -137,19 +139,63 @@ enum ReportFormat {
 ///
 /// * `verbose` - Enable debug-level logging
 /// * `no_color` - Disable ANSI colors in output
-fn init_tracing(verbose: bool, no_color: bool) {
+/// * `is_tui` - Whether the command starts the TUI (`watch`)
+fn init_tracing(verbose: bool, no_color: bool, is_tui: bool) -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         let level = if verbose { "debug" } else { "info" };
         EnvFilter::new(format!("{level},hyper=warn,mio=warn,notify=warn"))
     });
 
-    // Check if colors should be disabled (flag or NO_COLOR env var)
-    let use_ansi = !no_color && std::env::var("NO_COLOR").is_err();
+    if is_tui {
+        let (writer, guard) = create_watch_log_writer();
+        tracing_subscriber::registry()
+            .with(fmt::layer().with_target(false).with_ansi(false).with_writer(writer))
+            .with(filter)
+            .init();
+        Some(guard)
+    } else {
+        // Check if colors should be disabled (flag or NO_COLOR env var)
+        let use_ansi = !no_color && std::env::var("NO_COLOR").is_err();
 
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_target(false).with_ansi(use_ansi))
-        .with(filter)
-        .init();
+        tracing_subscriber::registry()
+            .with(fmt::layer().with_target(false).with_ansi(use_ansi))
+            .with(filter)
+            .init();
+        None
+    }
+}
+
+/// Creates a non-blocking file writer for watch-mode tracing logs.
+fn create_watch_log_writer() -> (NonBlocking, WorkerGuard) {
+    let requested_path = std::env::var_os("CH_MIGRATE_LOG_FILE")
+        .map_or_else(|| PathBuf::from("/tmp/ch-migrate-watch.log"), PathBuf::from);
+
+    let (mut directory, mut file_name) = split_log_path(&requested_path);
+    if std::fs::create_dir_all(&directory).is_err() {
+        directory = PathBuf::from("/tmp");
+        "ch-migrate-watch.log".clone_into(&mut file_name);
+        let _ = std::fs::create_dir_all(&directory);
+    }
+
+    let appender = tracing_appender::rolling::never(directory, file_name);
+    tracing_appender::non_blocking(appender)
+}
+
+/// Splits a path into `(directory, file_name)` suitable for rolling file appenders.
+fn split_log_path(path: &Path) -> (PathBuf, String) {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("ch-migrate-watch.log")
+        .to_owned();
+
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+
+    (directory, file_name)
 }
 
 /// Builds a [`Config`] from CLI arguments.
@@ -160,43 +206,30 @@ fn init_tracing(verbose: bool, no_color: bool) {
 ///
 /// Returns an error if the path is not provided, doesn't exist, or isn't a directory.
 fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Config> {
-    let path = cli
-        .path
-        .clone()
-        .unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
+    let path = cli.path.clone().unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
 
     // Validate path exists
     if !path.exists() {
-        return Err(color_eyre::eyre::eyre!(
-            "Path does not exist: {}",
-            path
-        ));
+        return Err(color_eyre::eyre::eyre!("Path does not exist: {}", path));
     }
 
     // Validate path is a directory
     if !path.is_dir() {
-        return Err(color_eyre::eyre::eyre!(
-            "Path is not a directory: {}",
-            path
-        ));
+        return Err(color_eyre::eyre::eyre!("Path is not a directory: {}", path));
     }
 
     let mut config = Config::default();
     config.scan.root_path = path;
-    config.scan.shared_path = cli
-        .shared_path
-        .clone()
-        .unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
+    config.scan.shared_path =
+        cli.shared_path.clone().unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
     config.scan.shared_2023_path = cli
         .shared_2023_path
         .clone()
         .unwrap_or_else(|| config.scan.root_path.join("app").join("shared_2023"));
 
     // Set app_path: use CLI arg or default to ./WebApp.Desktop/src/app
-    config.scan.app_path = cli
-        .app_path
-        .clone()
-        .unwrap_or_else(|| config.scan.root_path.join("app"));
+    config.scan.app_path =
+        cli.app_path.clone().unwrap_or_else(|| config.scan.root_path.join("app"));
 
     if let Some(name) = config.scan.shared_path.file_name() {
         config.scan.shared_dir = name.to_owned();
@@ -207,11 +240,7 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
     config.editor.editor.clone_from(&cli.editor);
 
     validate_dir(&config.scan.shared_path, "shared", require_shared_paths)?;
-    validate_dir(
-        &config.scan.shared_2023_path,
-        "shared_2023",
-        require_shared_paths,
-    )?;
+    validate_dir(&config.scan.shared_2023_path, "shared_2023", require_shared_paths)?;
     // app_path is always required since we scan it for model consumers
     validate_dir(&config.scan.app_path, "app", true)?;
 
@@ -221,26 +250,20 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
 fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::Result<()> {
     if path.as_str().is_empty() {
         if required {
-            return Err(color_eyre::eyre::eyre!(
-                "{label} path is required but missing."
-            ));
+            return Err(color_eyre::eyre::eyre!("{label} path is required but missing."));
         }
         return Ok(());
     }
 
     if !path.exists() {
         if required {
-            return Err(color_eyre::eyre::eyre!(
-                "{label} path does not exist: {path}"
-            ));
+            return Err(color_eyre::eyre::eyre!("{label} path does not exist: {path}"));
         }
         return Ok(());
     }
 
     if !path.is_dir() {
-        return Err(color_eyre::eyre::eyre!(
-            "{label} path is not a directory: {path}"
-        ));
+        return Err(color_eyre::eyre::eyre!("{label} path is not a directory: {path}"));
     }
 
     Ok(())
@@ -256,8 +279,8 @@ fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::
 /// Returns an error if the scanner cannot be created.
 fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
     // Use app_path for scanning (not root_path) to restrict to application code only
-    let scanner_config = ScannerConfig::new(&config.scan.app_path)
-        .with_skip_dirs(&["node_modules", "dist", ".git"]);
+    let scanner_config =
+        ScannerConfig::new(&config.scan.app_path).with_skip_dirs(&["node_modules", "dist", ".git"]);
     let matcher = ModelPathMatcher::from_scan_config(&config.scan);
 
     Scanner::new_with_matcher(scanner_config, matcher)
@@ -325,7 +348,7 @@ async fn run_watch(config: Config, no_watch: bool) -> color_eyre::Result<()> {
     // Handle SIGTERM for graceful shutdown on Unix
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
 
         let mut sigterm = signal(SignalKind::terminate())?;
 
@@ -439,10 +462,7 @@ fn print_detailed_file_list(scanner: &Scanner) {
 }
 
 /// Generates a JSON report.
-fn generate_json_report(
-    stats: &StatsSnapshot,
-    files: &[FileInfo],
-) -> color_eyre::Result<String> {
+fn generate_json_report(stats: &StatsSnapshot, files: &[FileInfo]) -> color_eyre::Result<String> {
     #[derive(serde::Serialize)]
     struct Report<'a> {
         stats: &'a StatsSnapshot,
@@ -499,8 +519,9 @@ async fn main() -> color_eyre::Result<()> {
     // 2. Parse CLI arguments
     let cli = Cli::parse();
 
-    // 3. Initialize tracing (handles --no-color for log output)
-    init_tracing(cli.verbose, cli.no_color);
+    // 3. Initialize tracing (watch logs go to file to avoid TUI redraw corruption)
+    let is_watch_mode = matches!(&cli.command, Commands::Watch { .. });
+    let _log_guard = init_tracing(cli.verbose, cli.no_color, is_watch_mode);
 
     // 5. Route to appropriate command
     match &cli.command {

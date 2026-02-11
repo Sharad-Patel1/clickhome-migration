@@ -78,6 +78,9 @@ pub enum Action {
     /// Set a specific status filter.
     SetStatusFilter(Option<MigrationStatus>),
 
+    /// Cycle the file list sort mode.
+    CycleSortMode,
+
     // =========================================================================
     // File Operations
     // =========================================================================
@@ -184,10 +187,7 @@ impl Action {
     /// Returns `true` if this action modifies the filter state.
     #[must_use]
     pub const fn modifies_filter(&self) -> bool {
-        matches!(
-            self,
-            Self::SetFilter(_) | Self::ClearFilter | Self::SetStatusFilter(_)
-        )
+        matches!(self, Self::SetFilter(_) | Self::ClearFilter | Self::SetStatusFilter(_))
     }
 }
 
@@ -199,6 +199,7 @@ mod tests {
     fn test_action_needs_render() {
         assert!(Action::NextItem.needs_render());
         assert!(Action::ToggleHelp.needs_render());
+        assert!(Action::CycleSortMode.needs_render());
         assert!(!Action::None.needs_render());
         assert!(!Action::Tick.needs_render());
     }
@@ -222,6 +223,7 @@ mod tests {
         assert!(Action::CycleStatusFilter.is_filter());
 
         assert!(!Action::NextItem.is_filter());
+        assert!(!Action::CycleSortMode.is_filter());
         assert!(!Action::Quit.is_filter());
     }
 

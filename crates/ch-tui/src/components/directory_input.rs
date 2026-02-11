@@ -34,9 +34,7 @@ impl Widget for &DirectoryInput<'_> {
             .border_style(self.theme.focused_border_style)
             .title(Span::styled(
                 " Directories (Tab to switch, Enter to apply, Esc to cancel) ",
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
             ))
             .style(Style::default().bg(Color::Rgb(30, 30, 40)));
 
@@ -72,24 +70,14 @@ fn build_field_line<'a>(
     theme: &'a Theme,
 ) -> Line<'a> {
     let label_style = if focused {
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
-    let value_style = if focused {
-        theme.base_style()
-    } else {
-        Style::default().fg(Color::Gray)
-    };
+    let value_style = if focused { theme.base_style() } else { Style::default().fg(Color::Gray) };
 
-    let display_value = if value.is_empty() {
-        "<unset>"
-    } else {
-        value
-    };
+    let display_value = if value.is_empty() { "<unset>" } else { value };
 
     let mut spans = vec![
         Span::styled(format!("{label}: "), label_style),

@@ -103,9 +103,7 @@ pub enum ScanError {
 
 impl From<ignore::Error> for ScanError {
     fn from(error: ignore::Error) -> Self {
-        Self::Walk {
-            error: Arc::new(error),
-        }
+        Self::Walk { error: Arc::new(error) }
     }
 }
 
@@ -113,19 +111,13 @@ impl ScanError {
     /// Creates a new [`ScanError::Read`] error.
     #[inline]
     pub fn read(path: impl Into<Utf8PathBuf>, source: std::io::Error) -> Self {
-        Self::Read {
-            path: path.into(),
-            error: Arc::new(source),
-        }
+        Self::Read { path: path.into(), error: Arc::new(source) }
     }
 
     /// Creates a new [`ScanError::Parse`] error.
     #[inline]
     pub fn parse(path: impl Into<Utf8PathBuf>, source: ch_ts_parser::ParseError) -> Self {
-        Self::Parse {
-            path: path.into(),
-            error: source,
-        }
+        Self::Parse { path: path.into(), error: source }
     }
 
     /// Creates a new [`ScanError::Config`] error.
@@ -174,7 +166,8 @@ mod tests {
 
     #[test]
     fn test_scan_error_read() {
-        let err = ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
+        let err =
+            ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
         assert!(err.is_recoverable());
         assert!(!err.is_fatal());
         assert_eq!(err.path().map(|p| p.as_str()), Some("src/foo.ts"));
@@ -225,7 +218,8 @@ mod tests {
 
     #[test]
     fn test_scan_error_clone() {
-        let err1 = ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
+        let err1 =
+            ScanError::read("src/foo.ts", io::Error::new(io::ErrorKind::NotFound, "not found"));
         let err2 = err1.clone();
         assert_eq!(err1.path(), err2.path());
     }

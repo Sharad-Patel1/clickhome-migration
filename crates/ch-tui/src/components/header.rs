@@ -32,24 +32,16 @@ impl<'a> HeaderBar<'a> {
     /// Creates a new header bar.
     #[must_use]
     pub const fn new(config: &'a Config, file_count: usize, scan_state: &'a ScanState) -> Self {
-        Self {
-            config,
-            file_count,
-            scan_state,
-        }
+        Self { config, file_count, scan_state }
     }
 }
 
 impl Widget for &HeaderBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let title_style = Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD);
+        let title_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
         let path_style = Style::default().fg(Color::White);
         let count_style = Style::default().fg(Color::Green);
-        let scanning_style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
+        let scanning_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
         let help_style = Style::default().fg(Color::Yellow);
 
         let project_path = self.config.scan.root_path.as_str();

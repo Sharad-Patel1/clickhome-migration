@@ -374,20 +374,11 @@ mod tests {
         assert!((snap.progress_percent() - 100.0).abs() < f64::EPSILON);
 
         // All migrated -> 100%
-        let snap = StatsSnapshot {
-            total: 100,
-            migrated: 100,
-            ..Default::default()
-        };
+        let snap = StatsSnapshot { total: 100, migrated: 100, ..Default::default() };
         assert!((snap.progress_percent() - 100.0).abs() < f64::EPSILON);
 
         // 50% migrated
-        let snap = StatsSnapshot {
-            total: 100,
-            legacy: 50,
-            migrated: 50,
-            ..Default::default()
-        };
+        let snap = StatsSnapshot { total: 100, legacy: 50, migrated: 50, ..Default::default() };
         assert!((snap.progress_percent() - 50.0).abs() < f64::EPSILON);
 
         // Mixed case
@@ -435,20 +426,11 @@ mod tests {
         assert!((snap.success_rate() - 100.0).abs() < f64::EPSILON);
 
         // No errors -> 100%
-        let snap = StatsSnapshot {
-            total: 100,
-            legacy: 100,
-            ..Default::default()
-        };
+        let snap = StatsSnapshot { total: 100, legacy: 100, ..Default::default() };
         assert!((snap.success_rate() - 100.0).abs() < f64::EPSILON);
 
         // 5% errors -> 95%
-        let snap = StatsSnapshot {
-            total: 100,
-            legacy: 95,
-            errors: 5,
-            ..Default::default()
-        };
+        let snap = StatsSnapshot { total: 100, legacy: 95, errors: 5, ..Default::default() };
         assert!((snap.success_rate() - 95.0).abs() < f64::EPSILON);
     }
 

@@ -64,11 +64,7 @@ impl ModelPathMatcher {
     /// Creates a matcher from scan configuration.
     #[must_use]
     pub fn from_scan_config(config: &ScanConfig) -> Self {
-        Self::new(
-            config.shared_dir_name(),
-            config.shared_2023_dir_name(),
-            &config.models_subdir,
-        )
+        Self::new(config.shared_dir_name(), config.shared_2023_dir_name(), &config.models_subdir)
     }
 }
 
@@ -225,11 +221,7 @@ fn is_shared_legacy_model_import(path: &str) -> bool {
 #[inline]
 fn is_shared_2023_model_import_with(path: &str, matcher: &ModelPathMatcher) -> bool {
     matches_path(path, &matcher.modern_models, &matcher.modern_models_slash)
-        || matches_path(
-            path,
-            &matcher.modern_interfaces,
-            &matcher.modern_interfaces_slash,
-        )
+        || matches_path(path, &matcher.modern_interfaces, &matcher.modern_interfaces_slash)
 }
 
 #[inline]
@@ -239,11 +231,7 @@ fn is_shared_legacy_model_import_with(path: &str, matcher: &ModelPathMatcher) ->
     }
 
     matches_path(path, &matcher.legacy_models, &matcher.legacy_models_slash)
-        || matches_path(
-            path,
-            &matcher.legacy_interfaces,
-            &matcher.legacy_interfaces_slash,
-        )
+        || matches_path(path, &matcher.legacy_interfaces, &matcher.legacy_interfaces_slash)
 }
 
 #[inline]
@@ -297,20 +285,14 @@ mod tests {
     #[test]
     fn test_detect_legacy_shared_models() {
         // Relative paths to models
-        assert_eq!(
-            detect_model_source("'../shared/models/foo'"),
-            Some(ModelSource::SharedLegacy)
-        );
+        assert_eq!(detect_model_source("'../shared/models/foo'"), Some(ModelSource::SharedLegacy));
         assert_eq!(
             detect_model_source("\"../../shared/models/foo\""),
             Some(ModelSource::SharedLegacy)
         );
 
         // Direct paths to models
-        assert_eq!(
-            detect_model_source("'shared/models/foo'"),
-            Some(ModelSource::SharedLegacy)
-        );
+        assert_eq!(detect_model_source("'shared/models/foo'"), Some(ModelSource::SharedLegacy));
 
         // With extension
         assert_eq!(
@@ -325,19 +307,13 @@ mod tests {
         );
 
         // Barrel import to models directory
-        assert_eq!(
-            detect_model_source("'../shared/models'"),
-            Some(ModelSource::SharedLegacy)
-        );
+        assert_eq!(detect_model_source("'../shared/models'"), Some(ModelSource::SharedLegacy));
     }
 
     #[test]
     fn test_detect_legacy_shared_interfaces() {
         // Interfaces file
-        assert_eq!(
-            detect_model_source("'../shared/interfaces'"),
-            Some(ModelSource::SharedLegacy)
-        );
+        assert_eq!(detect_model_source("'../shared/interfaces'"), Some(ModelSource::SharedLegacy));
 
         // Interfaces with extension
         assert_eq!(
@@ -346,10 +322,7 @@ mod tests {
         );
 
         // Direct path to interfaces
-        assert_eq!(
-            detect_model_source("'shared/interfaces'"),
-            Some(ModelSource::SharedLegacy)
-        );
+        assert_eq!(detect_model_source("'shared/interfaces'"), Some(ModelSource::SharedLegacy));
     }
 
     #[test]
@@ -365,10 +338,7 @@ mod tests {
         );
 
         // Direct paths to models
-        assert_eq!(
-            detect_model_source("'shared_2023/models/foo'"),
-            Some(ModelSource::Shared2023)
-        );
+        assert_eq!(detect_model_source("'shared_2023/models/foo'"), Some(ModelSource::Shared2023));
 
         // With extension
         assert_eq!(
@@ -383,10 +353,7 @@ mod tests {
         );
 
         // Barrel import to models directory
-        assert_eq!(
-            detect_model_source("'../shared_2023/models'"),
-            Some(ModelSource::Shared2023)
-        );
+        assert_eq!(detect_model_source("'../shared_2023/models'"), Some(ModelSource::Shared2023));
     }
 
     #[test]
@@ -398,10 +365,7 @@ mod tests {
         );
 
         // Direct path to interfaces
-        assert_eq!(
-            detect_model_source("'shared_2023/interfaces'"),
-            Some(ModelSource::Shared2023)
-        );
+        assert_eq!(detect_model_source("'shared_2023/interfaces'"), Some(ModelSource::Shared2023));
 
         // Interfaces with extension
         assert_eq!(
@@ -454,10 +418,7 @@ mod tests {
 
         // Edge case: paths like shared_2023/shared/models don't match either pattern
         // because they're not valid model paths (no shared_2023/models or shared/interfaces)
-        assert_eq!(
-            detect_model_source("'shared_2023/shared/models/foo'"),
-            None
-        );
+        assert_eq!(detect_model_source("'shared_2023/shared/models/foo'"), None);
     }
 
     #[test]
@@ -474,14 +435,8 @@ mod tests {
             extract_model_name("'../shared/models/active-contract'"),
             Some("active-contract")
         );
-        assert_eq!(
-            extract_model_name("'../shared/interfaces'"),
-            Some("interfaces")
-        );
-        assert_eq!(
-            extract_model_name("'../shared/models/foo.ts'"),
-            Some("foo")
-        );
+        assert_eq!(extract_model_name("'../shared/interfaces'"), Some("interfaces"));
+        assert_eq!(extract_model_name("'../shared/models/foo.ts'"), Some("foo"));
         assert_eq!(extract_model_name("''"), None);
     }
 

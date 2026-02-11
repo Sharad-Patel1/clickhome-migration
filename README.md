@@ -197,7 +197,8 @@ ch-migrate watch --path /path/to/WebApp.Desktop/src --no-watch
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
 | `Enter` | View file details |
-| `/` | Filter files |
+| `/` | Filter files (`=query` for exact path/model match) |
+| `s` | Cycle sort mode (Path A-Z, Legacy ↓, Legacy ↑) |
 | `?` | Show help |
 | `r` | Refresh scan |
 | `Tab` | Switch focus |

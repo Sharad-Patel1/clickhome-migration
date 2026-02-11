@@ -38,10 +38,8 @@ impl Widget for &FilterInput<'_> {
         let input_content = if self.text.is_empty() {
             Line::from(vec![
                 Span::styled(
-                    "Type to filter...",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
+                    "Type path/model (prefix = for exact match)...",
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
                 ),
                 Span::styled("▌", Style::default().fg(self.theme.accent)),
             ])
@@ -56,16 +54,13 @@ impl Widget for &FilterInput<'_> {
             .borders(Borders::ALL)
             .border_style(self.theme.focused_border_style)
             .title(Span::styled(
-                " Filter (Esc to cancel, Enter to confirm) ",
-                Style::default()
-                    .fg(self.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                " Filter by Path/Model (=exact, Esc cancel, Enter confirm) ",
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
             ))
             .style(Style::default().bg(Color::Rgb(30, 30, 40)));
 
-        let paragraph = Paragraph::new(input_content)
-            .block(block)
-            .alignment(ratatui::layout::Alignment::Left);
+        let paragraph =
+            Paragraph::new(input_content).block(block).alignment(ratatui::layout::Alignment::Left);
 
         paragraph.render(area, buf);
     }

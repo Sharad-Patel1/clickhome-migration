@@ -84,8 +84,8 @@ pub use error::ConfigError;
 
 // Re-export hash utilities
 pub use hash::{
-    fx_hash_map, fx_hash_map_with_capacity, fx_hash_set, fx_hash_set_with_capacity, FxBuildHasher,
-    FxHashMap, FxHashSet,
+    FxBuildHasher, FxHashMap, FxHashSet, fx_hash_map, fx_hash_map_with_capacity, fx_hash_set,
+    fx_hash_set_with_capacity,
 };
 
 // Re-export domain types

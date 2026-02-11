@@ -61,7 +61,7 @@ use ch_core::Config;
 use ch_scanner::{ScanUpdate, Scanner};
 use ch_watcher::{FileWatcher, TypeScriptFilter};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 // Public re-exports
 pub use action::Action;
@@ -127,6 +127,8 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
 
     // CHANGED: Enter terminal FIRST for instant feedback
     tui.enter()?;
+    app.set_terminal_size(tui.size());
+    app.reconcile_view_state();
 
     // Spawn background scan if not in setup mode
     let scan_rx = if app.needs_directory_setup() {
@@ -134,7 +136,7 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
         None
     } else {
         // Spawn streaming scan in background for instant UI
-        info!("Starting background streaming scan");
+        debug!("Starting background streaming scan");
         Some(spawn_background_scan(&app.scanner))
     };
 
@@ -142,7 +144,7 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
     let mut watcher: Option<FileWatcher> = None;
 
     // Main event loop
-    info!("Entering main event loop");
+    debug!("Entering main event loop");
     let result = run_event_loop(&mut tui, &mut app, &mut watcher, scan_rx, &config, &theme).await;
 
     // Exit terminal (restore state)
@@ -150,7 +152,7 @@ pub async fn run(config: Config, scanner: Scanner) -> Result<(), TuiError> {
 
     // Shutdown watcher gracefully
     if let Some(w) = watcher {
-        info!("Shutting down file watcher");
+        debug!("Shutting down file watcher");
         if let Err(e) = w.shutdown().await {
             error!(error = %e, "Error shutting down watcher");
         }
@@ -224,6 +226,7 @@ async fn run_event_loop(
                 Event::Mouse(mouse) => app.handle_mouse(mouse),
                 Event::Resize { width, height } => {
                     app.set_terminal_size(ratatui::layout::Rect::new(0, 0, width, height));
+                    app.reconcile_view_state();
                     Action::Render
                 }
                 Event::FileChanged(file_event) => app.handle_file_change(file_event),
@@ -234,7 +237,7 @@ async fn run_event_loop(
                     // Start watcher after scan completes
                     if is_complete && config.watch.enabled && watcher.is_none() {
                         // Watch app_path only (not root_path) to match scan scope
-                        info!(app_path = %config.scan.app_path, "Starting file watcher after scan");
+                        debug!(app_path = %config.scan.app_path, "Starting file watcher after scan");
                         match FileWatcher::new(
                             &config.scan.app_path,
                             &config.watch,
@@ -245,7 +248,8 @@ async fn run_event_loop(
                             Ok(w) => *watcher = Some(w),
                             Err(e) => {
                                 error!(error = %e, "Failed to start file watcher");
-                                app.status = Some(StatusMessage::error(format!("Watcher failed: {e}")));
+                                app.status =
+                                    Some(StatusMessage::error(format!("Watcher failed: {e}")));
                             }
                         }
                         // Clear the scan receiver since scan is done
@@ -265,16 +269,23 @@ async fn run_event_loop(
             match action {
                 Action::OpenInEditor => {
                     let selected = app.selected_file().map(|file| {
-                        let legacy_location = file.legacy_imports().next().map(|import| import.location);
+                        let legacy_location =
+                            file.legacy_imports().next().map(|import| import.location);
                         let fallback_location = file.imports.first().map(|import| import.location);
                         (file.path.clone(), legacy_location.or(fallback_location))
                     });
                     if let Some((path, location)) = selected {
-                        if let Err(e) =
-                            editor::run_editor(&path, &app.config.scan.root_path, &app.config, tui, location)
-                        {
+                        if let Err(e) = editor::run_editor(
+                            &path,
+                            &app.config.scan.root_path,
+                            &app.config,
+                            tui,
+                            location,
+                        ) {
                             app.status = Some(StatusMessage::error(format!("Editor failed: {e}")));
                         }
+                        app.set_terminal_size(tui.size());
+                        app.reconcile_view_state();
                     } else {
                         app.status = Some(StatusMessage::info("No file selected"));
                     }
@@ -289,8 +300,9 @@ async fn run_event_loop(
                     }
                 }
 
-                info!(path = %root, "Restarting file watcher");
-                match FileWatcher::new(&root, &app.config.watch, TypeScriptFilter::default()).await {
+                debug!(path = %root, "Restarting file watcher");
+                match FileWatcher::new(&root, &app.config.watch, TypeScriptFilter::default()).await
+                {
                     Ok(w) => *watcher = Some(w),
                     Err(e) => {
                         error!(error = %e, "Failed to restart file watcher");
@@ -303,7 +315,7 @@ async fn run_event_loop(
 
         // Check for quit
         if app.should_quit {
-            info!("Quit requested");
+            debug!("Quit requested");
             break;
         }
     }

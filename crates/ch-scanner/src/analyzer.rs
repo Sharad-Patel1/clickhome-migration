@@ -51,17 +51,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelRegistry, ModelSource};
-use ch_ts_parser::{detect_model_source_with, ArenaParser, ModelPathMatcher};
+use ch_ts_parser::{ArenaParser, ModelPathMatcher, detect_model_source_with};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use rustc_hash::FxHasher;
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
 
+use crate::ScanUpdate;
 use crate::cache::ScanCache;
 use crate::error::ScanError;
 use crate::stats::ScanStats;
-use crate::ScanUpdate;
 
 /// Parallel file analyzer using rayon and per-thread arenas.
 ///
@@ -211,62 +211,58 @@ impl FileAnalyzer {
         // Collect errors using mutex (errors are rare, so contention is minimal)
         let errors: Mutex<Vec<(Utf8PathBuf, ScanError)>> = Mutex::new(Vec::new());
 
-        paths
-            .par_iter()
-            .for_each_init(
-                // Per-thread initialization: create parser + get arena member
-                || {
-                    let ts_parser = ArenaParser::new().ok();
-                    let tsx_parser = ArenaParser::new_tsx().ok();
-                    let member = herd.get();
-                    (ts_parser, tsx_parser, member, tx.clone())
-                },
-                // Process each file
-                |(ts_parser, tsx_parser, member, sender), path| {
-                    stats.increment_total();
+        paths.par_iter().for_each_init(
+            // Per-thread initialization: create parser + get arena member
+            || {
+                let ts_parser = ArenaParser::new().ok();
+                let tsx_parser = ArenaParser::new_tsx().ok();
+                let member = herd.get();
+                (ts_parser, tsx_parser, member, tx.clone())
+            },
+            // Process each file
+            |(ts_parser, tsx_parser, member, sender), path| {
+                stats.increment_total();
 
-                    let result = self.analyze_file_inner(
-                        path,
-                        ts_parser.as_mut(),
-                        tsx_parser.as_mut(),
-                        member.as_bump(),
-                        matcher,
-                        registry,
-                    );
+                let result = self.analyze_file_inner(
+                    path,
+                    ts_parser.as_mut(),
+                    tsx_parser.as_mut(),
+                    member.as_bump(),
+                    matcher,
+                    registry,
+                );
 
-                    match result {
-                        Ok(file_info) => {
-                            // Update statistics based on status
-                            match file_info.status {
-                                MigrationStatus::Legacy => stats.increment_legacy(),
-                                MigrationStatus::Migrated => stats.increment_migrated(),
-                                MigrationStatus::Partial => stats.increment_partial(),
-                                MigrationStatus::NoModels => stats.increment_no_models(),
-                                _ => {} // Handle any future status variants
-                            }
-
-                            // Insert into cache
-                            cache.insert(file_info.clone());
-
-                            // Send update (ignore if receiver dropped)
-                            // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
-                            let _ = sender.blocking_send(ScanUpdate::FileScanned(Box::new(file_info)));
+                match result {
+                    Ok(file_info) => {
+                        // Update statistics based on status
+                        match file_info.status {
+                            MigrationStatus::Legacy => stats.increment_legacy(),
+                            MigrationStatus::Migrated => stats.increment_migrated(),
+                            MigrationStatus::Partial => stats.increment_partial(),
+                            MigrationStatus::NoModels => stats.increment_no_models(),
+                            _ => {} // Handle any future status variants
                         }
-                        Err(e) => {
-                            stats.increment_errors();
 
-                            // Collect error
-                            errors.lock().push((path.clone(), e.clone()));
+                        // Insert into cache
+                        cache.insert(file_info.clone());
 
-                            // Send error update (ignore if receiver dropped)
-                            let _ = sender.blocking_send(ScanUpdate::FileError {
-                                path: path.clone(),
-                                error: e,
-                            });
-                        }
+                        // Send update (ignore if receiver dropped)
+                        // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
+                        let _ = sender.blocking_send(ScanUpdate::FileScanned(Box::new(file_info)));
                     }
-                },
-            );
+                    Err(e) => {
+                        stats.increment_errors();
+
+                        // Collect error
+                        errors.lock().push((path.clone(), e.clone()));
+
+                        // Send error update (ignore if receiver dropped)
+                        let _ = sender
+                            .blocking_send(ScanUpdate::FileError { path: path.clone(), error: e });
+                    }
+                }
+            },
+        );
 
         // Return collected errors
         errors.into_inner()
@@ -300,21 +296,10 @@ impl FileAnalyzer {
         let arena = bumpalo::Bump::new();
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
 
-        let mut parser = if is_tsx {
-            ArenaParser::new_tsx()
-        } else {
-            ArenaParser::new()
-        }
-        .map_err(|e| ScanError::parse(path, e))?;
+        let mut parser = if is_tsx { ArenaParser::new_tsx() } else { ArenaParser::new() }
+            .map_err(|e| ScanError::parse(path, e))?;
 
-        self.analyze_file_inner(
-            path,
-            Some(&mut parser),
-            None,
-            &arena,
-            matcher,
-            registry,
-        )
+        self.analyze_file_inner(path, Some(&mut parser), None, &arena, matcher, registry)
     }
 
     /// Internal file analysis implementation.
@@ -329,8 +314,8 @@ impl FileAnalyzer {
         registry: Option<&ModelRegistry>,
     ) -> Result<FileInfo, ScanError> {
         // Read file contents
-        let contents = fs::read_to_string(path.as_std_path())
-            .map_err(|e| ScanError::read(path, e))?;
+        let contents =
+            fs::read_to_string(path.as_std_path()).map_err(|e| ScanError::read(path, e))?;
 
         // Calculate content hash
         let content_hash = hash_content(&contents);
@@ -340,20 +325,15 @@ impl FileAnalyzer {
 
         // Select parser based on extension
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
-        let parser = if is_tsx {
-            tsx_parser.or(ts_parser)
-        } else {
-            ts_parser.or(tsx_parser)
-        };
+        let parser = if is_tsx { tsx_parser.or(ts_parser) } else { ts_parser.or(tsx_parser) };
 
         let Some(parser) = parser else {
             return Err(ScanError::config("no parser available"));
         };
 
         // Parse the file
-        let parse_result = parser
-            .parse_with_arena(arena, &contents)
-            .map_err(|e| ScanError::parse(path, e))?;
+        let parse_result =
+            parser.parse_with_arena(arena, &contents).map_err(|e| ScanError::parse(path, e))?;
 
         // Convert imports to owned and calculate status
         let mut imports: SmallVec<[ImportInfo; 8]> = parse_result
@@ -369,16 +349,11 @@ impl FileAnalyzer {
                 // If we have a registry, validate that at least one imported name
                 // is a known model export from the detected source
                 if let Some(reg) = registry {
-                    let has_model_export = import.names.iter().any(|name| {
-                        reg.is_export_from(name, detected_source)
-                    });
+                    let has_model_export =
+                        import.names.iter().any(|name| reg.is_export_from(name, detected_source));
 
                     // Only mark as model import if it has actual model exports
-                    import.source = if has_model_export {
-                        Some(detected_source)
-                    } else {
-                        None
-                    };
+                    import.source = if has_model_export { Some(detected_source) } else { None };
                 } else {
                     // No registry - use path-based detection only
                     import.source = Some(detected_source);
@@ -391,10 +366,8 @@ impl FileAnalyzer {
         let status = determine_status(&imports);
 
         // Get current timestamp
-        let last_scanned = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let last_scanned =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
 
         Ok(FileInfo {
             id: file_id,
@@ -476,19 +449,13 @@ mod tests {
 
     #[test]
     fn test_determine_status_legacy() {
-        let imports = vec![
-            make_import(Some(ModelSource::SharedLegacy)),
-            make_import(None),
-        ];
+        let imports = vec![make_import(Some(ModelSource::SharedLegacy)), make_import(None)];
         assert_eq!(determine_status(&imports), MigrationStatus::Legacy);
     }
 
     #[test]
     fn test_determine_status_migrated() {
-        let imports = vec![
-            make_import(Some(ModelSource::Shared2023)),
-            make_import(None),
-        ];
+        let imports = vec![make_import(Some(ModelSource::Shared2023)), make_import(None)];
         assert_eq!(determine_status(&imports), MigrationStatus::Migrated);
     }
 

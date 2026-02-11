@@ -246,11 +246,7 @@ impl ModelReference {
     #[inline]
     #[must_use]
     pub fn new(name: impl Into<String>, category: ModelCategory, source: ModelSource) -> Self {
-        Self {
-            name: name.into(),
-            category,
-            source,
-        }
+        Self { name: name.into(), category, source }
     }
 
     /// Returns `true` if this reference is from the legacy source.
@@ -705,10 +701,7 @@ mod tests {
             serde_json::to_string(&ModelSource::SharedLegacy).unwrap(),
             r#""shared_legacy""#
         );
-        assert_eq!(
-            serde_json::to_string(&ModelSource::Shared2023).unwrap(),
-            r#""shared2023""#
-        );
+        assert_eq!(serde_json::to_string(&ModelSource::Shared2023).unwrap(), r#""shared2023""#);
     }
 
     #[test]
@@ -745,8 +738,7 @@ mod tests {
 
     #[test]
     fn test_model_reference_is_legacy() {
-        let legacy =
-            ModelReference::new("Foo", ModelCategory::Model, ModelSource::SharedLegacy);
+        let legacy = ModelReference::new("Foo", ModelCategory::Model, ModelSource::SharedLegacy);
         assert!(legacy.is_legacy());
 
         let new = ModelReference::new("Foo", ModelCategory::Model, ModelSource::Shared2023);

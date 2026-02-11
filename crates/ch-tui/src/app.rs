@@ -21,14 +21,14 @@
 
 use std::time::Instant;
 
-use camino::Utf8PathBuf;
-use ch_core::{Config, FileInfo, MigrationStatus};
+use camino::{Utf8Path, Utf8PathBuf};
+use ch_core::{Config, FileInfo, ImportInfo, MigrationStatus};
 use ch_scanner::{ScanConfig as ScannerConfig, ScanResult, ScanUpdate, Scanner, StatsSnapshot};
 use ch_ts_parser::ModelPathMatcher;
 use ch_watcher::FileEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::Rect;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::action::Action;
 use crate::error::TuiError;
@@ -85,7 +85,8 @@ impl ScanState {
     #[must_use]
     pub fn progress_percent(&self) -> Option<f64> {
         match self {
-            Self::Scanning { discovered, scanned } if *discovered > 0 => {
+            Self::Scanning { discovered, scanned } if *discovered > 0 =>
+            {
                 #[allow(clippy::cast_precision_loss)]
                 Some((*scanned as f64 / *discovered as f64) * 100.0)
             }
@@ -112,6 +113,40 @@ impl Focus {
         match self {
             Self::FileList => Self::DetailPane,
             Self::DetailPane => Self::FileList,
+        }
+    }
+}
+
+/// Sort modes for the file list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortMode {
+    /// Sort by path in ascending order.
+    #[default]
+    PathAsc,
+    /// Sort by legacy models remaining in descending order.
+    LegacyRemainingDesc,
+    /// Sort by legacy models remaining in ascending order.
+    LegacyRemainingAsc,
+}
+
+impl SortMode {
+    /// Returns the next sort mode in the cycle order.
+    #[must_use]
+    pub const fn cycle(self) -> Self {
+        match self {
+            Self::PathAsc => Self::LegacyRemainingDesc,
+            Self::LegacyRemainingDesc => Self::LegacyRemainingAsc,
+            Self::LegacyRemainingAsc => Self::PathAsc,
+        }
+    }
+
+    /// Returns a human-readable label for the sort mode.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PathAsc => "Path A-Z",
+            Self::LegacyRemainingDesc => "Legacy remaining ↓",
+            Self::LegacyRemainingAsc => "Legacy remaining ↑",
         }
     }
 }
@@ -143,9 +178,7 @@ impl FileListState {
     /// Returns the number of items in the filtered list.
     #[must_use]
     pub fn len(&self, total_files: usize) -> usize {
-        self.filtered_indices
-            .as_ref()
-            .map_or(total_files, Vec::len)
+        self.filtered_indices.as_ref().map_or(total_files, Vec::len)
     }
 
     /// Returns `true` if the filtered list is empty.
@@ -284,12 +317,31 @@ impl FileListState {
     /// Ensures the selected item is visible.
     fn ensure_visible(&mut self) {
         if let Some(selected) = self.selected {
+            let visible_rows = self.visible_height.max(1);
             if selected < self.scroll_offset {
                 self.scroll_offset = selected;
-            } else if selected >= self.scroll_offset + self.visible_height {
-                self.scroll_offset = selected.saturating_sub(self.visible_height - 1);
+            } else if selected >= self.scroll_offset + visible_rows {
+                self.scroll_offset = selected.saturating_sub(visible_rows.saturating_sub(1));
             }
         }
+    }
+
+    /// Reconciles selection and scroll offset with the current list length.
+    pub fn reconcile(&mut self, total_files: usize) {
+        let len = self.len(total_files);
+        if len == 0 {
+            self.selected = None;
+            self.scroll_offset = 0;
+            return;
+        }
+
+        let selected = self.selected.unwrap_or(0).min(len - 1);
+        self.selected = Some(selected);
+
+        let visible_rows = self.visible_height.max(1);
+        let max_scroll = len.saturating_sub(visible_rows);
+        self.scroll_offset = self.scroll_offset.min(max_scroll);
+        self.ensure_visible();
     }
 }
 
@@ -438,21 +490,13 @@ impl StatusMessage {
     /// Creates a new info message.
     #[must_use]
     pub fn info(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            timestamp: Instant::now(),
-            is_error: false,
-        }
+        Self { text: text.into(), timestamp: Instant::now(), is_error: false }
     }
 
     /// Creates a new error message.
     #[must_use]
     pub fn error(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            timestamp: Instant::now(),
-            is_error: true,
-        }
+        Self { text: text.into(), timestamp: Instant::now(), is_error: true }
     }
 
     /// Returns `true` if the message should be auto-hidden.
@@ -472,7 +516,7 @@ pub struct App {
     /// The file scanner.
     pub scanner: Scanner,
 
-    /// Cached list of all files (sorted by path).
+    /// Cached list of all files.
     files: Vec<FileInfo>,
 
     /// Current UI mode.
@@ -489,6 +533,9 @@ pub struct App {
 
     /// Current filter configuration.
     pub filter: FilterState,
+
+    /// Current sort mode for the file list.
+    sort_mode: SortMode,
 
     /// Status message to display.
     pub status: Option<StatusMessage>,
@@ -524,15 +571,9 @@ impl App {
     pub fn new(config: Config, scanner: Scanner) -> Self {
         let needs_setup = Self::requires_directory_setup(&config);
         let directory_setup = DirectorySetup::from_config(&config);
-        let mode = if needs_setup {
-            AppMode::DirectorySetup
-        } else {
-            AppMode::Normal
-        };
+        let mode = if needs_setup { AppMode::DirectorySetup } else { AppMode::Normal };
         let status = if needs_setup {
-            Some(StatusMessage::info(
-                "Select directories and press Enter to apply",
-            ))
+            Some(StatusMessage::info("Select directories and press Enter to apply"))
         } else {
             None
         };
@@ -545,6 +586,7 @@ impl App {
             file_list_state: FileListState::new(),
             detail_state: DetailPaneState::default(),
             filter: FilterState::default(),
+            sort_mode: SortMode::default(),
             status,
             directory_setup,
             pending_watcher_restart: None,
@@ -562,7 +604,7 @@ impl App {
     ///
     /// Returns an error if the scan fails.
     pub fn initial_scan(&mut self) -> Result<(), TuiError> {
-        info!("Performing initial scan");
+        debug!("Performing initial scan");
         let result = self.scanner.scan()?;
 
         self.stats = result.stats;
@@ -609,6 +651,7 @@ impl App {
             KeyCode::Tab => Action::ToggleFocus,
             KeyCode::Char('/') => Action::EnterFilterMode,
             KeyCode::Char('f') => Action::CycleStatusFilter,
+            KeyCode::Char('s') => Action::CycleSortMode,
             KeyCode::Char('o') => Action::OpenInEditor,
             KeyCode::Char('r') => Action::Rescan,
             KeyCode::Char('d') => Action::EnterDirectorySetup,
@@ -746,6 +789,11 @@ impl App {
                 self.filter.status = status;
                 self.apply_filter();
             }
+            Action::CycleSortMode => {
+                self.sort_mode = self.sort_mode.cycle();
+                self.sort_and_refresh_files();
+                self.status = Some(StatusMessage::info(format!("Sort: {}", self.sort_mode.label())));
+            }
 
             Action::Rescan => {
                 if let Err(e) = self.rescan() {
@@ -758,11 +806,8 @@ impl App {
             }
 
             Action::ToggleHelp => {
-                self.mode = if self.mode == AppMode::Help {
-                    AppMode::Normal
-                } else {
-                    AppMode::Help
-                };
+                self.mode =
+                    if self.mode == AppMode::Help { AppMode::Normal } else { AppMode::Help };
             }
             Action::ShowHelp => {
                 self.mode = AppMode::Help;
@@ -777,23 +822,20 @@ impl App {
             }
             Action::ExitDirectorySetup => {
                 if Self::requires_directory_setup(&self.config) {
-                    self.status = Some(StatusMessage::error(
-                        "Directory setup required to continue",
-                    ));
+                    self.status =
+                        Some(StatusMessage::error("Directory setup required to continue"));
                 } else {
                     self.mode = AppMode::Normal;
                 }
             }
-            Action::ApplyDirectorySetup => {
-                match self.apply_directory_setup() {
-                    Ok(()) => {
-                        self.mode = AppMode::Normal;
-                    }
-                    Err(e) => {
-                        self.status = Some(StatusMessage::error(format!("{e}")));
-                    }
+            Action::ApplyDirectorySetup => match self.apply_directory_setup() {
+                Ok(()) => {
+                    self.mode = AppMode::Normal;
                 }
-            }
+                Err(e) => {
+                    self.status = Some(StatusMessage::error(format!("{e}")));
+                }
+            },
 
             Action::ShowStatus(text) => {
                 self.status = Some(StatusMessage::info(text));
@@ -832,11 +874,8 @@ impl App {
     pub fn handle_scan_update(&mut self, update: ScanUpdate) {
         match update {
             ScanUpdate::PathsDiscovered(count) => {
-                info!(count, "Paths discovered");
-                self.scan_state = ScanState::Scanning {
-                    discovered: count,
-                    scanned: 0,
-                };
+                debug!(count, "Paths discovered");
+                self.scan_state = ScanState::Scanning { discovered: count, scanned: 0 };
                 // Pre-allocate storage for efficiency
                 self.files.reserve(count);
                 self.status = Some(StatusMessage::info(format!("Scanning {count} files...")));
@@ -853,11 +892,7 @@ impl App {
                 self.files_dirty = true;
 
                 // Update progress counter
-                if let ScanState::Scanning {
-                    discovered,
-                    ref mut scanned,
-                } = self.scan_state
-                {
+                if let ScanState::Scanning { discovered, ref mut scanned } = self.scan_state {
                     *scanned += 1;
                     // Update status message periodically (every 100 files)
                     if *scanned % 100 == 0 {
@@ -872,7 +907,7 @@ impl App {
                 self.stats.errors += 1;
             }
             ScanUpdate::Complete(result) => {
-                info!(
+                debug!(
                     total = result.stats.total,
                     legacy = result.stats.legacy,
                     migrated = result.stats.migrated,
@@ -882,10 +917,8 @@ impl App {
                 self.stats = result.stats;
                 // Force sort and apply filters
                 self.sort_and_refresh_files();
-                self.status = Some(StatusMessage::info(format!(
-                    "Scanned {} files",
-                    self.stats.total
-                )));
+                self.status =
+                    Some(StatusMessage::info(format!("Scanned {} files", self.stats.total)));
             }
         }
     }
@@ -902,6 +935,20 @@ impl App {
         }
     }
 
+    /// Returns the legacy model count remaining in a file.
+    ///
+    /// Counts imported names from legacy imports and falls back to `1` per import
+    /// when no names are present.
+    #[must_use]
+    pub fn legacy_remaining_count(file: &FileInfo) -> usize {
+        file.legacy_imports().map(|import| import.names.len().max(1)).sum()
+    }
+
+    /// Sorts files in place according to the current sort mode.
+    fn sort_files_in_place(&mut self) {
+        sort_files_for_mode(&mut self.files, self.sort_mode);
+    }
+
     /// Sorts files if dirty (called before render).
     ///
     /// This deferred sorting approach avoids O(n log n) sort per file
@@ -909,24 +956,28 @@ impl App {
     /// sorted once before each render.
     pub fn sort_files_if_needed(&mut self) {
         if self.files_dirty {
-            self.files.sort_by(|a, b| a.path.cmp(&b.path));
+            let selected_path = self.selected_file_path();
+            self.sort_files_in_place();
             self.files_dirty = false;
 
             // Re-apply filter if active
             if self.filter.is_active() {
                 self.apply_filter();
-            }
-
-            // Ensure selection is valid
-            if self.file_list_state.selected.is_none() && !self.files.is_empty() {
+            } else if self.file_list_state.selected.is_none() && !self.files.is_empty() {
                 self.file_list_state.selected = Some(0);
             }
+
+            if let Some(path) = selected_path {
+                let _ = self.restore_selection_by_path(path.as_path());
+            }
+            self.file_list_state.reconcile(self.files.len());
         }
     }
 
     /// Sorts files and refreshes the display after a scan completes.
     fn sort_and_refresh_files(&mut self) {
-        self.files.sort_by(|a, b| a.path.cmp(&b.path));
+        let selected_path = self.selected_file_path();
+        self.sort_files_in_place();
         self.files_dirty = false;
 
         // Re-apply filter if active
@@ -935,6 +986,11 @@ impl App {
         } else if self.file_list_state.selected.is_none() && !self.files.is_empty() {
             self.file_list_state.selected = Some(0);
         }
+
+        if let Some(path) = selected_path {
+            let _ = self.restore_selection_by_path(path.as_path());
+        }
+        self.file_list_state.reconcile(self.files.len());
     }
 
     /// Returns true if the directory setup should be shown.
@@ -950,7 +1006,7 @@ impl App {
 
     /// Performs a full rescan.
     fn rescan(&mut self) -> Result<ScanResult, TuiError> {
-        info!("Rescanning files");
+        debug!("Rescanning files");
         let result = self.scanner.scan()?;
         self.stats = result.stats;
         self.refresh_file_list();
@@ -976,11 +1032,8 @@ impl App {
         }
 
         self.rebuild_scanner()?;
-        self.pending_watcher_restart = if self.config.watch.enabled {
-            Some(self.config.scan.root_path.clone())
-        } else {
-            None
-        };
+        self.pending_watcher_restart =
+            if self.config.watch.enabled { Some(self.config.scan.root_path.clone()) } else { None };
 
         if let Err(e) = self.rescan() {
             self.status = Some(StatusMessage::error(format!("Rescan failed: {e}")));
@@ -995,17 +1048,16 @@ impl App {
         let shared = parse_dir_input("shared", &self.directory_setup.shared_input)?;
         let shared_2023 = parse_dir_input("shared_2023", &self.directory_setup.shared_2023_input)?;
 
-        Ok(DirectoryPaths {
-            root,
-            shared,
-            shared_2023,
-        })
+        Ok(DirectoryPaths { root, shared, shared_2023 })
     }
 
     fn rebuild_scanner(&mut self) -> Result<(), TuiError> {
         // Use app_path for scanning to restrict to application code only
-        let scanner_config = ScannerConfig::new(&self.config.scan.app_path)
-            .with_skip_dirs(&["node_modules", "dist", ".git"]);
+        let scanner_config = ScannerConfig::new(&self.config.scan.app_path).with_skip_dirs(&[
+            "node_modules",
+            "dist",
+            ".git",
+        ]);
         let matcher = ModelPathMatcher::from_scan_config(&self.config.scan);
         self.scanner = Scanner::new_with_matcher(scanner_config, matcher)?;
         Ok(())
@@ -1028,10 +1080,10 @@ impl App {
 
     /// Refreshes the file list from the scanner cache.
     fn refresh_file_list(&mut self) {
+        let selected_path = self.selected_file_path();
         self.files = self.scanner.cache().all_files();
 
-        // Sort by path for consistent ordering
-        self.files.sort_by(|a, b| a.path.cmp(&b.path));
+        self.sort_files_in_place();
 
         // Re-apply filter if active
         if self.filter.is_active() {
@@ -1039,36 +1091,43 @@ impl App {
         } else if self.file_list_state.selected.is_none() && !self.files.is_empty() {
             self.file_list_state.selected = Some(0);
         }
+
+        if let Some(path) = selected_path {
+            let _ = self.restore_selection_by_path(path.as_path());
+        }
+        self.file_list_state.reconcile(self.files.len());
     }
 
     /// Applies the current filter to the file list.
     fn apply_filter(&mut self) {
-        if !self.filter.is_active() {
+        let selected_path = self.selected_file_path();
+        let query = ParsedTextFilter::parse(self.filter.text.trim());
+        let status_filter = self.filter.status;
+
+        if query.is_empty() && status_filter.is_none() {
             self.file_list_state.clear_filter();
+            if let Some(path) = selected_path {
+                let _ = self.restore_selection_by_path(path.as_path());
+            } else if self.file_list_state.selected.is_none() && !self.files.is_empty() {
+                self.file_list_state.selected = Some(0);
+            }
+            self.file_list_state.reconcile(self.files.len());
             return;
         }
-
-        let text_lower = self.filter.text.to_lowercase();
-        let status_filter = self.filter.status;
 
         let indices: Vec<usize> = self
             .files
             .iter()
             .enumerate()
-            .filter(|(_, file)| {
-                // Text filter
-                let text_match =
-                    text_lower.is_empty() || file.path.as_str().to_lowercase().contains(&text_lower);
-
-                // Status filter
-                let status_match = status_filter.is_none_or(|s| file.status == s);
-
-                text_match && status_match
-            })
+            .filter(|(_, file)| file_matches_filters_parsed(file, query, status_filter))
             .map(|(i, _)| i)
             .collect();
 
         self.file_list_state.set_filter(Some(indices));
+        if let Some(path) = selected_path {
+            let _ = self.restore_selection_by_path(path.as_path());
+        }
+        self.file_list_state.reconcile(self.files.len());
     }
 
     /// Returns the currently selected file, if any.
@@ -1078,6 +1137,52 @@ impl App {
             .selected
             .map(|idx| self.file_list_state.actual_index(idx))
             .and_then(|idx| self.files.get(idx))
+    }
+
+    /// Returns the currently selected file path.
+    fn selected_file_path(&self) -> Option<Utf8PathBuf> {
+        self.selected_file().map(|file| file.path.clone())
+    }
+
+    /// Restores selection to the given path, returning whether a match was found.
+    fn restore_selection_by_path(&mut self, path: &Utf8Path) -> bool {
+        let display_index = if let Some(indices) = self.file_list_state.filtered_indices() {
+            indices
+                .iter()
+                .position(|&idx| self.files.get(idx).is_some_and(|file| file.path == path))
+        } else {
+            self.files.iter().position(|file| file.path == path)
+        };
+
+        if let Some(display_index) = display_index {
+            self.file_list_state.select(display_index, self.files.len());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns the data required to render the file list with persistent widget state.
+    pub(crate) fn file_list_render_data(
+        &mut self,
+    ) -> (&[FileInfo], bool, bool, &mut FileListState) {
+        (
+            &self.files,
+            self.filter.is_active(),
+            self.focus == Focus::FileList,
+            &mut self.file_list_state,
+        )
+    }
+
+    /// Returns the data required to render the detail pane with persistent widget state.
+    pub(crate) fn detail_render_data(&mut self) -> (Option<&FileInfo>, bool, &mut DetailPaneState) {
+        let selected_file = self
+            .file_list_state
+            .selected
+            .map(|idx| self.file_list_state.actual_index(idx))
+            .and_then(|idx| self.files.get(idx));
+
+        (selected_file, self.focus == Focus::DetailPane, &mut self.detail_state)
     }
 
     /// Returns all files (for rendering).
@@ -1092,6 +1197,12 @@ impl App {
         self.files.len()
     }
 
+    /// Returns the current sort mode.
+    #[must_use]
+    pub const fn sort_mode(&self) -> SortMode {
+        self.sort_mode
+    }
+
     /// Returns the count of files matching the current filter.
     #[must_use]
     pub fn filtered_count(&self) -> usize {
@@ -1101,6 +1212,11 @@ impl App {
     /// Updates the terminal size.
     pub fn set_terminal_size(&mut self, size: Rect) {
         self.terminal_size = size;
+    }
+
+    /// Reconciles list selection and scroll offsets after terminal/UI lifecycle changes.
+    pub fn reconcile_view_state(&mut self) {
+        self.file_list_state.reconcile(self.files.len());
     }
 
     /// Handles a file change event from the watcher.
@@ -1123,7 +1239,7 @@ impl App {
             return Action::None;
         }
 
-        info!(path = %event.path, "File changed, triggering rescan");
+        debug!(path = %event.path, "File changed, triggering rescan");
 
         // Show status message
         let file_name = event.file_name().unwrap_or(event.path.as_str());
@@ -1152,9 +1268,7 @@ fn parse_dir_input(label: &str, input: &str) -> Result<Utf8PathBuf, TuiError> {
         return Err(TuiError::config(format!("{label} path not found: {path}")));
     }
     if !path.is_dir() {
-        return Err(TuiError::config(format!(
-            "{label} path is not a directory: {path}"
-        )));
+        return Err(TuiError::config(format!("{label} path is not a directory: {path}")));
     }
 
     Ok(path)
@@ -1162,6 +1276,92 @@ fn parse_dir_input(label: &str, input: &str) -> Result<Utf8PathBuf, TuiError> {
 
 fn is_valid_dir(path: &Utf8PathBuf) -> bool {
     !path.as_str().is_empty() && path.exists() && path.is_dir()
+}
+
+fn sort_files_for_mode(files: &mut [FileInfo], sort_mode: SortMode) {
+    files.sort_unstable_by(|a, b| match sort_mode {
+        SortMode::PathAsc => a.path.cmp(&b.path),
+        SortMode::LegacyRemainingDesc => {
+            App::legacy_remaining_count(b)
+                .cmp(&App::legacy_remaining_count(a))
+                .then_with(|| a.path.cmp(&b.path))
+        }
+        SortMode::LegacyRemainingAsc => {
+            App::legacy_remaining_count(a)
+                .cmp(&App::legacy_remaining_count(b))
+                .then_with(|| a.path.cmp(&b.path))
+        }
+    });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextFilterMode {
+    Contains,
+    Exact,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ParsedTextFilter<'a> {
+    mode: TextFilterMode,
+    needle: &'a str,
+}
+
+impl<'a> ParsedTextFilter<'a> {
+    fn parse(raw: &'a str) -> Self {
+        if let Some(rest) = raw.strip_prefix('=') {
+            Self { mode: TextFilterMode::Exact, needle: rest.trim() }
+        } else {
+            Self { mode: TextFilterMode::Contains, needle: raw }
+        }
+    }
+
+    const fn is_empty(self) -> bool {
+        self.needle.is_empty()
+    }
+}
+
+fn contains_case_insensitive_ascii(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+
+    let haystack = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    haystack.windows(needle.len()).any(|window| window.eq_ignore_ascii_case(needle))
+}
+
+fn matches_text(haystack: &str, query: ParsedTextFilter<'_>) -> bool {
+    match query.mode {
+        TextFilterMode::Contains => contains_case_insensitive_ascii(haystack, query.needle),
+        TextFilterMode::Exact => haystack.eq_ignore_ascii_case(query.needle),
+    }
+}
+
+fn import_matches_model_query(import: &ImportInfo, query: ParsedTextFilter<'_>) -> bool {
+    import.source.is_some()
+        && (matches_text(&import.path, query)
+            || import.names.iter().any(|name| matches_text(name, query)))
+}
+
+fn file_matches_text_or_model(file: &FileInfo, query: ParsedTextFilter<'_>) -> bool {
+    query.is_empty()
+        || matches_text(file.path.as_str(), query)
+        || file.imports.iter().any(|import| import_matches_model_query(import, query))
+}
+
+fn file_matches_filters_parsed(
+    file: &FileInfo,
+    query: ParsedTextFilter<'_>,
+    status_filter: Option<MigrationStatus>,
+) -> bool {
+    let text_match = file_matches_text_or_model(file, query);
+    let status_match = status_filter.is_none_or(|status| file.status == status);
+    text_match && status_match
+}
+
+#[cfg(test)]
+fn file_matches_filters(file: &FileInfo, query: &str, status_filter: Option<MigrationStatus>) -> bool {
+    file_matches_filters_parsed(file, ParsedTextFilter::parse(query.trim()), status_filter)
 }
 
 impl App {
@@ -1175,6 +1375,34 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ch_core::{FileId, ImportKind, ModelSource, SourceLocation};
+    use smallvec::{SmallVec, smallvec};
+
+    fn make_import(path: &str, source: Option<ModelSource>, names: &[&str]) -> ImportInfo {
+        ImportInfo::new(
+            path,
+            ImportKind::Named,
+            names.iter().map(|name| (*name).to_owned()).collect::<SmallVec<[String; 4]>>(),
+            source,
+            SourceLocation::default(),
+        )
+    }
+
+    fn make_file(
+        path: &str,
+        status: MigrationStatus,
+        imports: SmallVec<[ImportInfo; 8]>,
+    ) -> FileInfo {
+        FileInfo {
+            id: FileId::new(1),
+            path: Utf8PathBuf::from(path),
+            content_hash: 0,
+            imports,
+            model_refs: SmallVec::new(),
+            status,
+            last_scanned: 0,
+        }
+    }
 
     #[test]
     fn test_app_mode_default() {
@@ -1185,6 +1413,112 @@ mod tests {
     fn test_focus_toggle() {
         assert_eq!(Focus::FileList.toggle(), Focus::DetailPane);
         assert_eq!(Focus::DetailPane.toggle(), Focus::FileList);
+    }
+
+    #[test]
+    fn test_sort_mode_cycle() {
+        assert_eq!(SortMode::PathAsc.cycle(), SortMode::LegacyRemainingDesc);
+        assert_eq!(
+            SortMode::LegacyRemainingDesc.cycle(),
+            SortMode::LegacyRemainingAsc
+        );
+        assert_eq!(SortMode::LegacyRemainingAsc.cycle(), SortMode::PathAsc);
+    }
+
+    #[test]
+    fn test_legacy_remaining_count_uses_imported_names_and_fallback() {
+        let file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![
+                make_import("../shared/models/order", Some(ModelSource::SharedLegacy), &["Order"]),
+                make_import(
+                    "../shared/models/account",
+                    Some(ModelSource::SharedLegacy),
+                    &["Account", "AccountForm"]
+                ),
+                make_import("../shared/models/empty", Some(ModelSource::SharedLegacy), &[]),
+                make_import("@angular/core", None, &["Component"])
+            ],
+        );
+
+        assert_eq!(App::legacy_remaining_count(&file), 4);
+    }
+
+    #[test]
+    fn test_sort_files_for_mode_legacy_remaining_desc_with_path_tiebreak() {
+        let mut files = vec![
+            make_file(
+                "src/zeta.ts",
+                MigrationStatus::Legacy,
+                smallvec![make_import(
+                    "../shared/models/foo",
+                    Some(ModelSource::SharedLegacy),
+                    &["Foo", "FooForm"]
+                )],
+            ),
+            make_file(
+                "src/alpha.ts",
+                MigrationStatus::Legacy,
+                smallvec![make_import(
+                    "../shared/models/bar",
+                    Some(ModelSource::SharedLegacy),
+                    &["Bar", "BarForm"]
+                )],
+            ),
+            make_file(
+                "src/beta.ts",
+                MigrationStatus::Legacy,
+                smallvec![make_import(
+                    "../shared/models/qux",
+                    Some(ModelSource::SharedLegacy),
+                    &["Qux"]
+                )],
+            ),
+        ];
+
+        sort_files_for_mode(&mut files, SortMode::LegacyRemainingDesc);
+
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/alpha.ts", "src/zeta.ts", "src/beta.ts"]);
+    }
+
+    #[test]
+    fn test_sort_files_for_mode_legacy_remaining_asc_with_path_tiebreak() {
+        let mut files = vec![
+            make_file(
+                "src/zeta.ts",
+                MigrationStatus::Legacy,
+                smallvec![make_import(
+                    "../shared/models/foo",
+                    Some(ModelSource::SharedLegacy),
+                    &["Foo", "FooForm"]
+                )],
+            ),
+            make_file(
+                "src/alpha.ts",
+                MigrationStatus::Legacy,
+                smallvec![make_import(
+                    "../shared/models/bar",
+                    Some(ModelSource::SharedLegacy),
+                    &["Bar"]
+                )],
+            ),
+            make_file(
+                "src/beta.ts",
+                MigrationStatus::Legacy,
+                smallvec![make_import(
+                    "../shared/models/qux",
+                    Some(ModelSource::SharedLegacy),
+                    &["Qux"]
+                )],
+            ),
+        ];
+
+        sort_files_for_mode(&mut files, SortMode::LegacyRemainingAsc);
+
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/alpha.ts", "src/beta.ts", "src/zeta.ts"]);
     }
 
     #[test]
@@ -1253,6 +1587,32 @@ mod tests {
     }
 
     #[test]
+    fn test_file_list_state_reconcile_clamps_selection_and_scroll() {
+        let mut state = FileListState::new();
+        state.visible_height = 5;
+        state.selected = Some(99);
+        state.scroll_offset = 99;
+
+        state.reconcile(8);
+
+        assert_eq!(state.selected, Some(7));
+        assert_eq!(state.scroll_offset, 3);
+    }
+
+    #[test]
+    fn test_file_list_state_reconcile_handles_zero_visible_height() {
+        let mut state = FileListState::new();
+        state.selected = Some(2);
+        state.scroll_offset = 0;
+        state.visible_height = 0;
+
+        state.reconcile(5);
+
+        assert_eq!(state.selected, Some(2));
+        assert_eq!(state.scroll_offset, 2);
+    }
+
+    #[test]
     fn test_status_message() {
         let msg = StatusMessage::info("Test message");
         assert!(!msg.is_error);
@@ -1260,5 +1620,186 @@ mod tests {
 
         let err = StatusMessage::error("Error!");
         assert!(err.is_error);
+    }
+
+    #[test]
+    fn test_filter_path_match_only() {
+        let file =
+            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+
+        assert!(file_matches_filters(&file, "orders", None));
+    }
+
+    #[test]
+    fn test_filter_model_symbol_match_only() {
+        let file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![make_import(
+                "../shared/models/active-contract",
+                Some(ModelSource::SharedLegacy),
+                &["ActiveContract"]
+            )],
+        );
+
+        assert!(file_matches_filters(&file, "activecontract", None));
+    }
+
+    #[test]
+    fn test_filter_model_path_match_only() {
+        let file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![make_import(
+                "../shared/models/active-contract",
+                Some(ModelSource::SharedLegacy),
+                &[]
+            )],
+        );
+
+        assert!(file_matches_filters(&file, "active-contract", None));
+    }
+
+    #[test]
+    fn test_filter_exact_path_match_only() {
+        let file =
+            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+
+        assert!(file_matches_filters(
+            &file,
+            "=src/features/orders.component.ts",
+            None
+        ));
+        assert!(file_matches_filters(
+            &file,
+            "=SRC/FEATURES/ORDERS.COMPONENT.TS",
+            None
+        ));
+        assert!(!file_matches_filters(&file, "=orders", None));
+    }
+
+    #[test]
+    fn test_filter_exact_model_symbol_match_only() {
+        let file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![make_import(
+                "../shared/models/active-contract",
+                Some(ModelSource::SharedLegacy),
+                &["ActiveContract"]
+            )],
+        );
+
+        assert!(file_matches_filters(&file, "=ActiveContract", None));
+        assert!(file_matches_filters(&file, "=activecontract", None));
+        assert!(!file_matches_filters(&file, "=active", None));
+    }
+
+    #[test]
+    fn test_filter_exact_model_path_match_only() {
+        let file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![make_import(
+                "../shared/models/active-contract",
+                Some(ModelSource::SharedLegacy),
+                &[]
+            )],
+        );
+
+        assert!(file_matches_filters(
+            &file,
+            "=../shared/models/active-contract",
+            None
+        ));
+        assert!(file_matches_filters(
+            &file,
+            "=../SHARED/MODELS/ACTIVE-CONTRACT",
+            None
+        ));
+        assert!(!file_matches_filters(&file, "=active-contract", None));
+    }
+
+    #[test]
+    fn test_filter_non_model_import_symbols_do_not_match_model_query() {
+        let file = make_file(
+            "src/foo.ts",
+            MigrationStatus::NoModels,
+            smallvec![make_import("@angular/core", None, &["Component"])],
+        );
+
+        assert!(!file_matches_filters(&file, "component", None));
+    }
+
+    #[test]
+    fn test_filter_query_and_status_intersection() {
+        let matching_file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![make_import(
+                "../shared/models/active-contract",
+                Some(ModelSource::SharedLegacy),
+                &["ActiveContract"]
+            )],
+        );
+        let wrong_status_file = make_file(
+            "src/bar.ts",
+            MigrationStatus::Migrated,
+            smallvec![make_import(
+                "../shared_2023/models/active-contract",
+                Some(ModelSource::Shared2023),
+                &["ActiveContract"]
+            )],
+        );
+
+        assert!(file_matches_filters(
+            &matching_file,
+            "activecontract",
+            Some(MigrationStatus::Legacy)
+        ));
+        assert!(!file_matches_filters(
+            &wrong_status_file,
+            "activecontract",
+            Some(MigrationStatus::Legacy)
+        ));
+
+        assert!(file_matches_filters(
+            &matching_file,
+            "=ActiveContract",
+            Some(MigrationStatus::Legacy)
+        ));
+        assert!(!file_matches_filters(
+            &wrong_status_file,
+            "=ActiveContract",
+            Some(MigrationStatus::Legacy)
+        ));
+    }
+
+    #[test]
+    fn test_filter_case_insensitive_path_and_model() {
+        let path_file =
+            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let model_file = make_file(
+            "src/foo.ts",
+            MigrationStatus::Legacy,
+            smallvec![make_import(
+                "../shared/models/active-contract",
+                Some(ModelSource::SharedLegacy),
+                &["ActiveContract"]
+            )],
+        );
+
+        assert!(file_matches_filters(&path_file, "ORDERS", None));
+        assert!(file_matches_filters(&model_file, "aCtIvEcOnTrAcT", None));
+    }
+
+    #[test]
+    fn test_filter_clearing_restores_unfiltered_list() {
+        let mut state = FileListState::new();
+        state.set_filter(Some(vec![1, 3]));
+        assert_eq!(state.len(5), 2);
+
+        state.clear_filter();
+        assert_eq!(state.len(5), 5);
     }
 }
