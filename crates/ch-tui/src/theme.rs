@@ -274,9 +274,18 @@ mod tests {
         let theme = Theme::dark();
 
         assert_eq!(theme.status_color(MigrationStatus::Legacy), theme.legacy_fg);
-        assert_eq!(theme.status_color(MigrationStatus::Migrated), theme.migrated_fg);
-        assert_eq!(theme.status_color(MigrationStatus::Partial), theme.partial_fg);
-        assert_eq!(theme.status_color(MigrationStatus::NoModels), theme.no_models_fg);
+        assert_eq!(
+            theme.status_color(MigrationStatus::Migrated),
+            theme.migrated_fg
+        );
+        assert_eq!(
+            theme.status_color(MigrationStatus::Partial),
+            theme.partial_fg
+        );
+        assert_eq!(
+            theme.status_color(MigrationStatus::NoModels),
+            theme.no_models_fg
+        );
     }
 
     #[test]

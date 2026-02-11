@@ -167,10 +167,22 @@ mod tests {
 
     #[test]
     fn test_migration_status_serialization() {
-        assert_eq!(serde_json::to_string(&MigrationStatus::Legacy).unwrap(), r#""legacy""#);
-        assert_eq!(serde_json::to_string(&MigrationStatus::Migrated).unwrap(), r#""migrated""#);
-        assert_eq!(serde_json::to_string(&MigrationStatus::Partial).unwrap(), r#""partial""#);
-        assert_eq!(serde_json::to_string(&MigrationStatus::NoModels).unwrap(), r#""no_models""#);
+        assert_eq!(
+            serde_json::to_string(&MigrationStatus::Legacy).unwrap(),
+            r#""legacy""#
+        );
+        assert_eq!(
+            serde_json::to_string(&MigrationStatus::Migrated).unwrap(),
+            r#""migrated""#
+        );
+        assert_eq!(
+            serde_json::to_string(&MigrationStatus::Partial).unwrap(),
+            r#""partial""#
+        );
+        assert_eq!(
+            serde_json::to_string(&MigrationStatus::NoModels).unwrap(),
+            r#""no_models""#
+        );
     }
 
     #[test]

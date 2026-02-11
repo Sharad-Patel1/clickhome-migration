@@ -35,7 +35,11 @@ impl<'a> StatsPanel<'a> {
         scan_state: &'a ScanState,
         theme: &'a Theme,
     ) -> Self {
-        Self { stats, scan_state, theme }
+        Self {
+            stats,
+            scan_state,
+            theme,
+        }
     }
 }
 
@@ -55,7 +59,11 @@ impl Widget for &StatsPanel<'_> {
             .split(inner);
 
         // Show scanning progress OR migration stats based on scan state
-        if let ScanState::Scanning { discovered, scanned } = self.scan_state {
+        if let ScanState::Scanning {
+            discovered,
+            scanned,
+        } = self.scan_state
+        {
             // Render scanning progress
             render_scanning_progress(*discovered, *scanned, &chunks, buf);
         } else {
@@ -71,16 +79,25 @@ fn render_scanning_progress(discovered: usize, scanned: usize, chunks: &[Rect], 
     let scanning_line = Line::from(vec![
         Span::styled(
             "Scanning... ",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!("{scanned}/{discovered} files"), Style::default().fg(Color::White)),
+        Span::styled(
+            format!("{scanned}/{discovered} files"),
+            Style::default().fg(Color::White),
+        ),
     ]);
 
     let status_paragraph = Paragraph::new(scanning_line);
     status_paragraph.render(chunks[0], buf);
 
     // Scanning progress gauge
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let progress_percent = if discovered > 0 {
         ((scanned as f64 / discovered as f64) * 100.0).round() as u16
     } else {
@@ -100,16 +117,28 @@ fn render_migration_stats(stats: &StatsSnapshot, chunks: &[Rect], buf: &mut Buff
     // Render stats counts
     let stats_line = Line::from(vec![
         Span::styled("Legacy: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{}", stats.legacy), Style::default().fg(theme.legacy_fg)),
+        Span::styled(
+            format!("{}", stats.legacy),
+            Style::default().fg(theme.legacy_fg),
+        ),
         Span::raw(" │ "),
         Span::styled("Partial: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{}", stats.partial), Style::default().fg(theme.partial_fg)),
+        Span::styled(
+            format!("{}", stats.partial),
+            Style::default().fg(theme.partial_fg),
+        ),
         Span::raw(" │ "),
         Span::styled("Migrated: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{}", stats.migrated), Style::default().fg(theme.migrated_fg)),
+        Span::styled(
+            format!("{}", stats.migrated),
+            Style::default().fg(theme.migrated_fg),
+        ),
         Span::raw(" │ "),
         Span::styled("No Models: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{}", stats.no_models), Style::default().fg(theme.no_models_fg)),
+        Span::styled(
+            format!("{}", stats.no_models),
+            Style::default().fg(theme.no_models_fg),
+        ),
     ]);
 
     let stats_paragraph = Paragraph::new(stats_line);

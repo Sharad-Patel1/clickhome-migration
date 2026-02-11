@@ -63,7 +63,11 @@ impl SourceLocation {
     #[inline]
     #[must_use]
     pub const fn new(line: u32, column: u32, byte_offset: u32) -> Self {
-        Self { line, column, byte_offset }
+        Self {
+            line,
+            column,
+            byte_offset,
+        }
     }
 }
 

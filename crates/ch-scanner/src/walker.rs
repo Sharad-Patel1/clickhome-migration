@@ -104,13 +104,21 @@ impl FileWalker {
     /// ```
     pub fn new(root: &Utf8Path) -> Result<Self, ScanError> {
         if !root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {root}")));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {root}"
+            )));
         }
         if !root.is_dir() {
-            return Err(ScanError::config(format!("root path is not a directory: {root}")));
+            return Err(ScanError::config(format!(
+                "root path is not a directory: {root}"
+            )));
         }
 
-        Ok(Self { root: root.to_owned(), skip_dirs: Vec::new(), follow_links: false })
+        Ok(Self {
+            root: root.to_owned(),
+            skip_dirs: Vec::new(),
+            follow_links: false,
+        })
     }
 
     /// Adds directories to skip during traversal.
@@ -221,7 +229,8 @@ impl FileWalker {
     /// Checks if a path is a TypeScript file based on extension.
     #[allow(clippy::unused_self)] // Method signature kept for consistency
     fn is_typescript_file(&self, path: &Utf8Path) -> bool {
-        path.extension().is_some_and(|ext| TYPESCRIPT_EXTENSIONS.contains(&ext))
+        path.extension()
+            .is_some_and(|ext| TYPESCRIPT_EXTENSIONS.contains(&ext))
     }
 
     /// Checks if a path should be skipped based on directory name.
@@ -258,8 +267,11 @@ mod tests {
 
     #[test]
     fn test_is_typescript_file() {
-        let walker =
-            FileWalker { root: Utf8PathBuf::from("."), skip_dirs: Vec::new(), follow_links: false };
+        let walker = FileWalker {
+            root: Utf8PathBuf::from("."),
+            skip_dirs: Vec::new(),
+            follow_links: false,
+        };
 
         assert!(walker.is_typescript_file(Utf8Path::new("foo.ts")));
         assert!(walker.is_typescript_file(Utf8Path::new("foo.tsx")));
@@ -294,9 +306,12 @@ mod tests {
 
     #[test]
     fn test_with_skip_dirs() {
-        let walker =
-            FileWalker { root: Utf8PathBuf::from("."), skip_dirs: Vec::new(), follow_links: false }
-                .with_skip_dirs(&["vendor", "third_party"]);
+        let walker = FileWalker {
+            root: Utf8PathBuf::from("."),
+            skip_dirs: Vec::new(),
+            follow_links: false,
+        }
+        .with_skip_dirs(&["vendor", "third_party"]);
 
         assert!(walker.skip_dirs.contains(&"vendor".to_owned()));
         assert!(walker.skip_dirs.contains(&"third_party".to_owned()));
@@ -304,9 +319,12 @@ mod tests {
 
     #[test]
     fn test_with_follow_links() {
-        let walker =
-            FileWalker { root: Utf8PathBuf::from("."), skip_dirs: Vec::new(), follow_links: false }
-                .with_follow_links(true);
+        let walker = FileWalker {
+            root: Utf8PathBuf::from("."),
+            skip_dirs: Vec::new(),
+            follow_links: false,
+        }
+        .with_follow_links(true);
 
         assert!(walker.follow_links);
     }

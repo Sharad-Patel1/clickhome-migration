@@ -258,7 +258,13 @@ impl<'bump> BumpImportBuilder<'bump> {
     #[inline]
     #[must_use]
     pub fn new(location: SourceLocation, is_type_only: bool) -> Self {
-        Self { source_path: None, names: SmallVec::new(), kind: None, location, is_type_only }
+        Self {
+            source_path: None,
+            names: SmallVec::new(),
+            kind: None,
+            location,
+            is_type_only,
+        }
     }
 
     /// Sets the source path.
@@ -313,7 +319,13 @@ impl<'bump> BumpImportBuilder<'bump> {
             ImportKind::Named
         };
 
-        Some(BumpImportInfo { path, kind, names: self.names, source, location: self.location })
+        Some(BumpImportInfo {
+            path,
+            kind,
+            names: self.names,
+            source,
+            location: self.location,
+        })
     }
 }
 
@@ -355,7 +367,10 @@ impl<'bump> StringInterner<'bump> {
     #[inline]
     #[must_use]
     pub fn new(arena: &'bump Bump) -> Self {
-        Self { arena, interned: FxHashMap::default() }
+        Self {
+            arena,
+            interned: FxHashMap::default(),
+        }
     }
 
     /// Creates a new string interner with pre-allocated capacity.
@@ -424,7 +439,13 @@ pub fn create_dynamic_bump_import(
     source: Option<ModelSource>,
     location: SourceLocation,
 ) -> BumpImportInfo<'_> {
-    BumpImportInfo { path, kind: ImportKind::Dynamic, names: SmallVec::new(), source, location }
+    BumpImportInfo {
+        path,
+        kind: ImportKind::Dynamic,
+        names: SmallVec::new(),
+        source,
+        location,
+    }
 }
 
 #[cfg(test)]

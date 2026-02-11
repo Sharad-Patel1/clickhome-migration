@@ -66,7 +66,11 @@ fn parse_editor_command(command: &str) -> Option<EditorCommand> {
     let args = parts.map(str::to_owned).collect::<Vec<_>>();
     let kind = editor_kind_from_program(&program);
 
-    Some(EditorCommand { program, args, kind })
+    Some(EditorCommand {
+        program,
+        args,
+        kind,
+    })
 }
 
 fn editor_kind_from_program(program: &str) -> EditorKind {
@@ -96,7 +100,11 @@ fn resolve_editor(config: &Config) -> Result<EditorCommand, TuiError> {
     } else if let Ok(editor) = env::var("EDITOR") {
         candidates.push(editor);
     } else {
-        candidates.extend(["cursor", "code", "nvim", "vim", "nano"].into_iter().map(str::to_owned));
+        candidates.extend(
+            ["cursor", "code", "nvim", "vim", "nano"]
+                .into_iter()
+                .map(str::to_owned),
+        );
     }
 
     for candidate in candidates {
@@ -105,7 +113,9 @@ fn resolve_editor(config: &Config) -> Result<EditorCommand, TuiError> {
         }
     }
 
-    Err(TuiError::config("No editor configured. Set --editor, $VISUAL, or $EDITOR."))
+    Err(TuiError::config(
+        "No editor configured. Set --editor, $VISUAL, or $EDITOR.",
+    ))
 }
 
 fn resolve_absolute_path(path: &Utf8Path, root: &Utf8Path) -> Utf8PathBuf {
@@ -154,13 +164,19 @@ pub fn run_editor(
                 command.arg("--goto");
             }
         }
-        command.args(location_args(editor.kind, absolute_path.as_path(), location));
+        command.args(location_args(
+            editor.kind,
+            absolute_path.as_path(),
+            location,
+        ));
 
         let status = command.status()?;
         if status.success() {
             Ok(())
         } else {
-            Err(TuiError::config(format!("Editor exited with status: {status}")))
+            Err(TuiError::config(format!(
+                "Editor exited with status: {status}"
+            )))
         }
     })();
 

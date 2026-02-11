@@ -42,7 +42,12 @@ impl<'a> FileListView<'a> {
         focused: bool,
         theme: &'a Theme,
     ) -> Self {
-        Self { files, filter_active, focused, theme }
+        Self {
+            files,
+            filter_active,
+            focused,
+            theme,
+        }
     }
 
     /// Builds rows for the table from the file list.
@@ -96,8 +101,11 @@ impl StatefulWidget for &FileListView<'_> {
         state.visible_height = inner_height as usize;
 
         // Border style based on focus
-        let border_style =
-            if self.focused { self.theme.focused_border_style } else { self.theme.border_style };
+        let border_style = if self.focused {
+            self.theme.focused_border_style
+        } else {
+            self.theme.border_style
+        };
 
         let title = if self.filter_active {
             format!(" Files ({} filtered) ", state.len(self.files.len()))
@@ -154,7 +162,10 @@ fn truncate_path(path: &str, max_width: usize) -> String {
 
     if available < 10 {
         // Path is too short, just truncate
-        return format!("{ellipsis}{}", &path[path.len().saturating_sub(available)..]);
+        return format!(
+            "{ellipsis}{}",
+            &path[path.len().saturating_sub(available)..]
+        );
     }
 
     // Show as much of the end as possible

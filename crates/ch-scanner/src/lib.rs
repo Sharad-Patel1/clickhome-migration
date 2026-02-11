@@ -377,7 +377,10 @@ impl Scanner {
     ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {}", config.root)));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
         }
 
         if !config.root.is_dir() {
@@ -445,7 +448,10 @@ impl Scanner {
     ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {}", config.root)));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
         }
 
         if !config.root.is_dir() {
@@ -508,8 +514,11 @@ impl Scanner {
         info!(count = paths.len(), "Collected TypeScript files");
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         // Analyze files in parallel
         let analyzer = FileAnalyzer::new();
@@ -617,14 +626,20 @@ impl Scanner {
         info!(count = path_count, "Collected TypeScript files");
 
         // Send paths discovered notification
-        if tx.blocking_send(ScanUpdate::PathsDiscovered(path_count)).is_err() {
+        if tx
+            .blocking_send(ScanUpdate::PathsDiscovered(path_count))
+            .is_err()
+        {
             // Receiver dropped, return early
             return Ok(());
         }
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         // Analyze files in parallel, streaming results
         let analyzer = FileAnalyzer::new();
@@ -682,8 +697,11 @@ impl Scanner {
         debug!(count = paths.len(), "Re-scanning files");
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         let analyzer = FileAnalyzer::new();
         let results = analyzer.analyze_files(paths, &self.model_path_matcher, registry_ref);
@@ -876,12 +894,17 @@ mod tests {
 
     #[test]
     fn test_scan_config_with_shared_paths() {
-        let config = ScanConfig::new(Utf8Path::new("./src"))
-            .with_shared_paths(Utf8Path::new("./src/shared"), Utf8Path::new("./src/shared_2023"));
+        let config = ScanConfig::new(Utf8Path::new("./src")).with_shared_paths(
+            Utf8Path::new("./src/shared"),
+            Utf8Path::new("./src/shared_2023"),
+        );
 
         assert!(config.use_registry);
         assert_eq!(config.shared_path, Some(Utf8PathBuf::from("./src/shared")));
-        assert_eq!(config.shared_2023_path, Some(Utf8PathBuf::from("./src/shared_2023")));
+        assert_eq!(
+            config.shared_2023_path,
+            Some(Utf8PathBuf::from("./src/shared_2023"))
+        );
     }
 
     #[test]

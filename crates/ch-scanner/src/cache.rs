@@ -31,7 +31,7 @@
 //! ```
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileInfo, FxHashMap, MigrationStatus, fx_hash_map_with_capacity};
+use ch_core::{fx_hash_map_with_capacity, FileInfo, FxHashMap, MigrationStatus};
 use parking_lot::RwLock;
 
 /// A thread-safe cache for storing [`FileInfo`] results.
@@ -105,7 +105,9 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { files: RwLock::new(fx_hash_map_with_capacity(capacity)) }
+        Self {
+            files: RwLock::new(fx_hash_map_with_capacity(capacity)),
+        }
     }
 
     /// Inserts a file into the cache.
@@ -284,7 +286,10 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn needs_update(&self, path: &Utf8PathBuf, content_hash: u64) -> bool {
-        self.files.read().get(path).is_none_or(|file| file.content_hash != content_hash)
+        self.files
+            .read()
+            .get(path)
+            .is_none_or(|file| file.content_hash != content_hash)
     }
 
     /// Returns all files with the specified migration status.
@@ -315,7 +320,12 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn files_with_status(&self, status: MigrationStatus) -> Vec<FileInfo> {
-        self.files.read().values().filter(|file| file.status == status).cloned().collect()
+        self.files
+            .read()
+            .values()
+            .filter(|file| file.status == status)
+            .cloned()
+            .collect()
     }
 
     /// Returns all files that need migration.
@@ -341,7 +351,12 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn files_needing_migration(&self) -> Vec<FileInfo> {
-        self.files.read().values().filter(|file| file.status.needs_migration()).cloned().collect()
+        self.files
+            .read()
+            .values()
+            .filter(|file| file.status.needs_migration())
+            .cloned()
+            .collect()
     }
 
     /// Returns all files in the cache as a vector.
