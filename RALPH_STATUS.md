@@ -4,10 +4,10 @@
 
 - Status: Done
 - Iteration: 3
-- Last Updated (UTC): 2026-02-12T05:49:10Z
+- Last Updated (UTC): 2026-02-12T05:51:20Z
 - Ordering Strategy: `topological-sort-by-blockedBy`
 - Current Branch: patelksharad/qua-133-phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency
-- Current Workflow Step: Step 12 complete (merge/PR pending)
+- Current Workflow Step: Step 13 complete (PR created)
 - End Signal: END_ISSUES
 
 ## Ticket In Progress
@@ -49,7 +49,7 @@
 ## Blockers & Notes
 
 - Graph artifacts expected at `./graph-artifacts` (default `ch-migrate graph` output).
-- Merge/PR not created yet (pending milestone branch context).
+- PR: https://github.com/Sharad-Patel1/clickhome-migration/pull/3
 
 ## Files Modified
 
@@ -71,5 +71,5 @@
 ## Git Summary
 
 - Branch: `patelksharad/qua-133-phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency`
-- Commit: `ea45392`
+- PR: https://github.com/Sharad-Patel1/clickhome-migration/pull/3
 - Uncommitted: PROMPT.md, ralph.py
