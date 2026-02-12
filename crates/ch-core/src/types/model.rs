@@ -34,6 +34,8 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
+use super::import::ImportKind;
+use super::location::SourceLocation;
 use crate::{FxHashMap, FxHashSet};
 
 /// The source directory of a model.
@@ -187,6 +189,201 @@ impl ModelCategory {
             self,
             Self::CodeGen | Self::CodeGenForApi | Self::CodeGenForm | Self::CodeGenFormArray
         )
+    }
+}
+
+/// Legacy/modern classification used by evidence and graphing layers.
+///
+/// This classification intentionally mirrors migration semantics while still
+/// allowing `Unknown` for unresolved or synthetic nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SourceClassification {
+    /// Entity is classified as part of the legacy ecosystem.
+    Legacy,
+
+    /// Entity is classified as part of the modern ecosystem.
+    Modern,
+
+    /// Entity classification is unknown or not yet resolved.
+    Unknown,
+}
+
+impl SourceClassification {
+    /// Returns `true` when this classification is legacy.
+    #[inline]
+    #[must_use]
+    pub const fn is_legacy(self) -> bool {
+        matches!(self, Self::Legacy)
+    }
+
+    /// Returns `true` when this classification is modern.
+    #[inline]
+    #[must_use]
+    pub const fn is_modern(self) -> bool {
+        matches!(self, Self::Modern)
+    }
+
+    /// Returns `true` when this classification is unknown.
+    #[inline]
+    #[must_use]
+    pub const fn is_unknown(self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+}
+
+/// Normalized graph edge semantics for migration planning.
+///
+/// These values form a compatibility contract between parser/scanner extraction
+/// and graph/planner stages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EdgeKind {
+    /// A symbol import relation (`import { Foo } from "..."`).
+    ImportsSymbol,
+
+    /// A symbol re-export relation (`export { Foo } from "..."`).
+    ReexportsSymbol,
+
+    /// A type-only reference relation.
+    TypeRef,
+
+    /// An `extends` inheritance relation.
+    Extends,
+
+    /// An `implements` interface conformance relation.
+    Implements,
+
+    /// A relation where one model constructs another.
+    Constructs,
+
+    /// A relation inferred from a factory call.
+    FactoryCall,
+
+    /// A service parameter type relation.
+    ServiceParamType,
+
+    /// A service return type relation.
+    ServiceReturnType,
+
+    /// A relation from explicit model-map registration.
+    ModelMapRegistration,
+
+    /// A relation that bridges legacy and modern model representations.
+    LegacyBridge,
+
+    /// A generation relation (source model generates target model artifact).
+    GeneratedFrom,
+}
+
+/// Provenance anchor that ties extracted evidence back to source CST locations.
+///
+/// Anchors carry both byte offsets and line/column data to support deterministic
+/// lookups in parser output and stable artifact serialization.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CstAnchor {
+    /// Source file containing the evidence.
+    pub file_path: Utf8PathBuf,
+
+    /// Inclusive starting byte offset of the anchor range.
+    pub start_byte: u32,
+
+    /// Exclusive ending byte offset of the anchor range.
+    pub end_byte: u32,
+
+    /// Start position (1-indexed line, 0-indexed column).
+    pub start: SourceLocation,
+
+    /// End position (1-indexed line, 0-indexed column).
+    pub end: SourceLocation,
+
+    /// Tree-sitter node kind.
+    pub node_kind: String,
+
+    /// Optional field name within the parent node.
+    pub field_name: Option<String>,
+
+    /// Optional import syntax kind when anchor comes from import/export forms.
+    pub import_kind: Option<ImportKind>,
+
+    /// Indicates whether the relation is type-only at this anchor.
+    pub is_type_only: bool,
+
+    /// Stable hash of the source snippet represented by this anchor.
+    pub snippet_hash: u64,
+}
+
+impl CstAnchor {
+    /// Creates a new CST anchor with optional fields set to defaults.
+    #[must_use]
+    pub fn new(
+        file_path: impl Into<Utf8PathBuf>,
+        start_byte: u32,
+        end_byte: u32,
+        start: SourceLocation,
+        end: SourceLocation,
+        node_kind: impl Into<String>,
+    ) -> Self {
+        Self {
+            file_path: file_path.into(),
+            start_byte,
+            end_byte,
+            start,
+            end,
+            node_kind: node_kind.into(),
+            field_name: None,
+            import_kind: None,
+            is_type_only: false,
+            snippet_hash: 0,
+        }
+    }
+
+    /// Returns `true` when the byte range is well-formed.
+    #[inline]
+    #[must_use]
+    pub const fn has_valid_byte_range(&self) -> bool {
+        self.start_byte <= self.end_byte
+    }
+
+    /// Returns the length of the anchored byte range.
+    #[inline]
+    #[must_use]
+    pub const fn byte_len(&self) -> u32 {
+        self.end_byte.saturating_sub(self.start_byte)
+    }
+}
+
+/// Normalized AST relation evidence extracted from source code.
+///
+/// This structure is intentionally compact and serializable so downstream
+/// graph and planning stages can consume stable relation payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstRelationEvidence {
+    /// The normalized relation semantics.
+    pub relation: EdgeKind,
+
+    /// Source model reference.
+    pub source: ModelReference,
+
+    /// Target model reference.
+    pub target: ModelReference,
+
+    /// Source CST anchors supporting this relation.
+    pub anchors: SmallVec<[CstAnchor; 2]>,
+}
+
+impl AstRelationEvidence {
+    /// Creates a new relation evidence entry.
+    #[must_use]
+    pub fn new(relation: EdgeKind, source: ModelReference, target: ModelReference) -> Self {
+        Self { relation, source, target, anchors: SmallVec::new() }
+    }
+
+    /// Adds a provenance anchor to this relation evidence.
+    pub fn add_anchor(&mut self, anchor: CstAnchor) {
+        self.anchors.push(anchor);
     }
 }
 
@@ -705,6 +902,39 @@ mod tests {
     }
 
     #[test]
+    fn test_source_classification_helpers() {
+        assert!(SourceClassification::Legacy.is_legacy());
+        assert!(SourceClassification::Modern.is_modern());
+        assert!(SourceClassification::Unknown.is_unknown());
+    }
+
+    #[test]
+    fn test_edge_kind_serialization_contract() {
+        let cases = [
+            (EdgeKind::ImportsSymbol, r#""imports_symbol""#),
+            (EdgeKind::ReexportsSymbol, r#""reexports_symbol""#),
+            (EdgeKind::TypeRef, r#""type_ref""#),
+            (EdgeKind::Extends, r#""extends""#),
+            (EdgeKind::Implements, r#""implements""#),
+            (EdgeKind::Constructs, r#""constructs""#),
+            (EdgeKind::FactoryCall, r#""factory_call""#),
+            (EdgeKind::ServiceParamType, r#""service_param_type""#),
+            (EdgeKind::ServiceReturnType, r#""service_return_type""#),
+            (EdgeKind::ModelMapRegistration, r#""model_map_registration""#),
+            (EdgeKind::LegacyBridge, r#""legacy_bridge""#),
+            (EdgeKind::GeneratedFrom, r#""generated_from""#),
+        ];
+
+        for (edge_kind, expected_json) in cases {
+            let serialized = serde_json::to_string(&edge_kind);
+            assert!(serialized.is_ok());
+            if let Ok(json) = serialized {
+                assert_eq!(json, expected_json);
+            }
+        }
+    }
+
+    #[test]
     fn test_model_category_suffix() {
         assert_eq!(ModelCategory::Interface.suffix(), "Model");
         assert_eq!(ModelCategory::Model.suffix(), "");
@@ -755,6 +985,140 @@ mod tests {
         let json = serde_json::to_string(&model_ref).unwrap();
         let parsed: ModelReference = serde_json::from_str(&json).unwrap();
         assert_eq!(model_ref, parsed);
+    }
+
+    #[test]
+    fn test_cst_anchor_helpers() {
+        let anchor = CstAnchor::new(
+            "src/features/order.service.ts",
+            10,
+            24,
+            SourceLocation::new(3, 4, 10),
+            SourceLocation::new(3, 18, 24),
+            "import_statement",
+        );
+
+        assert!(anchor.has_valid_byte_range());
+        assert_eq!(anchor.byte_len(), 14);
+        assert!(anchor.field_name.is_none());
+        assert!(anchor.import_kind.is_none());
+        assert!(!anchor.is_type_only);
+        assert_eq!(anchor.snippet_hash, 0);
+    }
+
+    #[test]
+    fn test_cst_anchor_serialization_round_trip() {
+        let mut anchor = CstAnchor::new(
+            "src/features/order.service.ts",
+            100,
+            132,
+            SourceLocation::new(7, 8, 100),
+            SourceLocation::new(7, 40, 132),
+            "import_statement",
+        );
+        anchor.field_name = Some("source".to_owned());
+        anchor.import_kind = Some(ImportKind::TypeOnly);
+        anchor.is_type_only = true;
+        anchor.snippet_hash = 0xFEED_BEEF;
+
+        let serialized = serde_json::to_string(&anchor);
+        assert!(serialized.is_ok());
+        if let Ok(json) = serialized {
+            let parsed: Result<CstAnchor, _> = serde_json::from_str(&json);
+            assert!(parsed.is_ok());
+            if let Ok(decoded) = parsed {
+                assert_eq!(anchor, decoded);
+            }
+        }
+    }
+
+    #[test]
+    fn test_ast_relation_evidence_serialization_round_trip() {
+        let source =
+            ModelReference::new("LegacyOrder", ModelCategory::Model, ModelSource::SharedLegacy);
+        let target = ModelReference::new("Order", ModelCategory::Model, ModelSource::Shared2023);
+
+        let mut evidence = AstRelationEvidence::new(EdgeKind::LegacyBridge, source, target);
+        evidence.add_anchor(CstAnchor::new(
+            "src/mappers/order-map.ts",
+            30,
+            80,
+            SourceLocation::new(2, 0, 30),
+            SourceLocation::new(2, 50, 80),
+            "call_expression",
+        ));
+
+        let serialized = serde_json::to_string(&evidence);
+        assert!(serialized.is_ok());
+        if let Ok(json) = serialized {
+            let parsed: Result<AstRelationEvidence, _> = serde_json::from_str(&json);
+            assert!(parsed.is_ok());
+            if let Ok(decoded) = parsed {
+                assert_eq!(evidence, decoded);
+            }
+        }
+    }
+
+    #[test]
+    fn test_ast_relation_evidence_json_snapshot() {
+        let source =
+            ModelReference::new("LegacyOrder", ModelCategory::Model, ModelSource::SharedLegacy);
+        let target = ModelReference::new("Order", ModelCategory::Model, ModelSource::Shared2023);
+
+        let mut evidence = AstRelationEvidence::new(EdgeKind::LegacyBridge, source, target);
+        let mut anchor = CstAnchor::new(
+            "src/mappers/order-map.ts",
+            30,
+            80,
+            SourceLocation::new(2, 0, 30),
+            SourceLocation::new(2, 50, 80),
+            "call_expression",
+        );
+        anchor.field_name = Some("arguments".to_owned());
+        anchor.import_kind = Some(ImportKind::Named);
+        anchor.snippet_hash = 42;
+        evidence.add_anchor(anchor);
+
+        insta::assert_json_snapshot!(
+            evidence,
+            @r#"
+        {
+          "relation": "legacy_bridge",
+          "source": {
+            "name": "LegacyOrder",
+            "category": "model",
+            "source": "shared_legacy"
+          },
+          "target": {
+            "name": "Order",
+            "category": "model",
+            "source": "shared2023"
+          },
+          "anchors": [
+            {
+              "file_path": "src/mappers/order-map.ts",
+              "start_byte": 30,
+              "end_byte": 80,
+              "start": {
+                "line": 2,
+                "column": 0,
+                "byte_offset": 30
+              },
+              "end": {
+                "line": 2,
+                "column": 50,
+                "byte_offset": 80
+              },
+              "node_kind": "call_expression",
+              "field_name": "arguments",
+              "import_kind": "named",
+              "is_type_only": false,
+              "snippet_hash": 42
+            }
+          ]
+        }
+        "#
+        );
     }
 
     // =========================================================================

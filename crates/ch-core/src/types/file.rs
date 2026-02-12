@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::import::ImportInfo;
-use super::model::ModelReference;
+use super::model::{AstRelationEvidence, ModelReference};
 use super::status::MigrationStatus;
 
 /// An opaque identifier for a scanned file.
@@ -103,6 +103,7 @@ impl From<FileId> for u64 {
 ///     content_hash: 0xDEADBEEF,
 ///     imports: smallvec![],
 ///     model_refs: smallvec![],
+///     relation_evidence: smallvec![],
 ///     status: MigrationStatus::NoModels,
 ///     last_scanned: 1704067200,
 /// };
@@ -134,6 +135,12 @@ pub struct FileInfo {
     /// Uses `SmallVec<[ModelReference; 4]>` to avoid heap allocation for
     /// files with 4 or fewer model references (the common case).
     pub model_refs: SmallVec<[ModelReference; 4]>,
+
+    /// Normalized relation evidence extracted for graph/planner stages.
+    ///
+    /// Uses `SmallVec<[AstRelationEvidence; 4]>` to avoid heap allocation for
+    /// files with only a few evidence entries.
+    pub relation_evidence: SmallVec<[AstRelationEvidence; 4]>,
 
     /// The migration status of this file.
     pub status: MigrationStatus,
@@ -171,6 +178,7 @@ impl FileInfo {
             content_hash: 0,
             imports: SmallVec::new(),
             model_refs: SmallVec::new(),
+            relation_evidence: SmallVec::new(),
             status: MigrationStatus::NoModels,
             last_scanned: 0,
         }
@@ -208,6 +216,13 @@ impl FileInfo {
     #[must_use]
     pub fn model_ref_count(&self) -> usize {
         self.model_refs.len()
+    }
+
+    /// Returns the number of relation evidence entries in this file.
+    #[inline]
+    #[must_use]
+    pub fn relation_evidence_count(&self) -> usize {
+        self.relation_evidence.len()
     }
 
     /// Returns `true` if this file needs migration work.
@@ -300,6 +315,7 @@ mod tests {
         assert_eq!(file.content_hash, 0);
         assert!(file.imports.is_empty());
         assert!(file.model_refs.is_empty());
+        assert!(file.relation_evidence.is_empty());
         assert_eq!(file.status, MigrationStatus::NoModels);
         assert_eq!(file.last_scanned, 0);
     }
@@ -387,6 +403,7 @@ mod tests {
             content_hash: 0xDEAD_BEEF,
             imports: smallvec![],
             model_refs: smallvec![],
+            relation_evidence: smallvec![],
             status: MigrationStatus::NoModels,
             last_scanned: 1_704_067_200,
         };

@@ -14,8 +14,12 @@
 #![deny(clippy::all)]
 #![warn(missing_docs)]
 
+pub mod types;
+
 use petgraph::Directed;
 use petgraph::graph::{Graph, NodeIndex};
+
+pub use types::{AstRelationEvidence, CstAnchor, EdgeKind, SourceClassification};
 
 /// Strongly-typed directed graph alias used by graph-planning tickets.
 ///
@@ -70,7 +74,12 @@ impl<Node, Edge> DependencyGraphBuilder<Node, Edge> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DependencyGraph, DependencyGraphBuilder};
+    use super::{
+        AstRelationEvidence, DependencyGraph, DependencyGraphBuilder, EdgeKind,
+        SourceClassification,
+    };
+    use crate::types::{ModelReference, ModelSource};
+    use ch_core::ModelCategory;
 
     #[test]
     fn smoke_builder_constructs_and_exports_graph() {
@@ -83,5 +92,16 @@ mod tests {
         let graph: DependencyGraph<_, _> = builder.into_graph();
         assert_eq!(graph.node_count(), 2);
         assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn smoke_reexported_contract_types_are_constructible() {
+        let source =
+            ModelReference::new("LegacyOrder", ModelCategory::Model, ModelSource::SharedLegacy);
+        let target = ModelReference::new("Order", ModelCategory::Model, ModelSource::Shared2023);
+        let evidence = AstRelationEvidence::new(EdgeKind::LegacyBridge, source, target);
+
+        assert_eq!(evidence.relation, EdgeKind::LegacyBridge);
+        assert!(SourceClassification::Unknown.is_unknown());
     }
 }

@@ -1399,6 +1399,7 @@ mod tests {
             content_hash: 0,
             imports,
             model_refs: SmallVec::new(),
+            relation_evidence: SmallVec::new(),
             status,
             last_scanned: 0,
         }

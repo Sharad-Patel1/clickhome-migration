@@ -90,6 +90,7 @@ pub use hash::{
 
 // Re-export domain types
 pub use types::{
-    ExportKind, FileId, FileInfo, ImportInfo, ImportKind, MigrationStatus, ModelCategory,
-    ModelDefinition, ModelReference, ModelRegistry, ModelSource, SourceLocation,
+    AstRelationEvidence, CstAnchor, EdgeKind, ExportKind, FileId, FileInfo, ImportInfo, ImportKind,
+    MigrationStatus, ModelCategory, ModelDefinition, ModelReference, ModelRegistry, ModelSource,
+    SourceClassification, SourceLocation,
 };

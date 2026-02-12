@@ -242,6 +242,7 @@ dependencies = [
 name = "ch-graph"
 version = "0.1.0"
 dependencies = [
+ "ch-core",
  "petgraph",
 ]
 

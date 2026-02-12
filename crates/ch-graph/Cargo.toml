@@ -9,6 +9,7 @@ rust-version.workspace = true
 description = "Dependency graph foundations for migration planning"
 
 [dependencies]
+ch-core.workspace = true
 petgraph.workspace = true
 
 [lints]

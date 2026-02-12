@@ -375,6 +375,7 @@ impl FileAnalyzer {
             content_hash,
             imports,
             model_refs: SmallVec::new(), // TODO: populate from imports
+            relation_evidence: SmallVec::new(),
             status,
             last_scanned,
         })
