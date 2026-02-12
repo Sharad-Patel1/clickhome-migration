@@ -11,6 +11,7 @@ pub mod comparator;
 pub mod graph;
 pub mod inventory;
 pub mod mapping;
+pub mod planner;
 pub mod types;
 
 pub use builder::DependencyGraphBuilder;
@@ -26,6 +27,11 @@ pub use inventory::{
 pub use mapping::{
     ComparatorConfig, GraphDiff, GraphDiffCounts, LegacyResidual, MappingReason, MappingReasonKind,
     MappingStatus, MappingWeights, ModelMapping,
+};
+pub use planner::{
+    EvidenceRef, GraphPlanner, MAX_RISK_BPS, MigrationPlan, MigrationPlanCounts, MigrationStep,
+    PlannerConfig, PlannerRiskWeights, RiskBreakdown, RiskComponentScore, RiskSignalKind,
+    SuggestedReplacement,
 };
 pub use types::{
     AstRelationEvidence, CstAnchor, EdgeKind, ModelArtifact, ModelReference, ModelSource,

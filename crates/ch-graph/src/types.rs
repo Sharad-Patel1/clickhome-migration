@@ -17,3 +17,8 @@ pub use crate::mapping::{
     ComparatorConfig, GraphDiff, GraphDiffCounts, LegacyResidual, MappingReason, MappingReasonKind,
     MappingStatus, MappingWeights, ModelMapping,
 };
+pub use crate::planner::{
+    EvidenceRef, GraphPlanner, MAX_RISK_BPS, MigrationPlan, MigrationPlanCounts, MigrationStep,
+    PlannerConfig, PlannerRiskWeights, RiskBreakdown, RiskComponentScore, RiskSignalKind,
+    SuggestedReplacement,
+};
