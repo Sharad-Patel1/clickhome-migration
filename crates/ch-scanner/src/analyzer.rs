@@ -50,11 +50,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelRegistry, ModelSource};
+use ch_core::{
+    AstRelationEvidence, FileId, FileInfo, ImportInfo, MigrationStatus, ModelCategory,
+    ModelReference, ModelRegistry, ModelSource,
+};
 use ch_ts_parser::{ArenaParser, ModelPathMatcher, detect_model_source_with};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use rustc_hash::FxHasher;
+use rustc_hash::{FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
 
@@ -335,6 +338,9 @@ impl FileAnalyzer {
         let parse_result =
             parser.parse_with_arena(arena, &contents).map_err(|e| ScanError::parse(path, e))?;
 
+        let relation_evidence: SmallVec<[AstRelationEvidence; 4]> =
+            parse_result.relations.into_iter().collect();
+
         // Convert imports to owned and calculate status
         let mut imports: SmallVec<[ImportInfo; 8]> = parse_result
             .imports
@@ -364,6 +370,7 @@ impl FileAnalyzer {
         }
 
         let status = determine_status(&imports);
+        let model_refs = build_model_refs(&imports, &relation_evidence, registry);
 
         // Get current timestamp
         let last_scanned =
@@ -374,11 +381,91 @@ impl FileAnalyzer {
             path: path.to_owned(),
             content_hash,
             imports,
-            model_refs: SmallVec::new(), // TODO: populate from imports
-            relation_evidence: SmallVec::new(),
+            model_refs,
+            relation_evidence,
             status,
             last_scanned,
         })
+    }
+}
+
+/// Builds deterministic model references from imports and relation evidence.
+///
+/// Order is stable by first-seen occurrence:
+/// 1. import-derived references
+/// 2. relation source/target references
+fn build_model_refs(
+    imports: &[ImportInfo],
+    relation_evidence: &[AstRelationEvidence],
+    registry: Option<&ModelRegistry>,
+) -> SmallVec<[ModelReference; 4]> {
+    let mut model_refs = SmallVec::new();
+    let mut seen: FxHashSet<(String, ModelCategory, ModelSource)> = FxHashSet::default();
+
+    for import in imports {
+        let Some(source) = import.source else {
+            continue;
+        };
+
+        for symbol in &import.names {
+            if let Some(model_ref) = model_ref_from_import_symbol(symbol, source, registry) {
+                push_unique_model_ref(&mut model_refs, &mut seen, model_ref);
+            }
+        }
+    }
+
+    for evidence in relation_evidence {
+        push_unique_model_ref(&mut model_refs, &mut seen, evidence.source.clone());
+        push_unique_model_ref(&mut model_refs, &mut seen, evidence.target.clone());
+    }
+
+    model_refs
+}
+
+/// Builds a model reference from an import symbol when it passes source validation.
+fn model_ref_from_import_symbol(
+    symbol: &str,
+    source: ModelSource,
+    registry: Option<&ModelRegistry>,
+) -> Option<ModelReference> {
+    if registry.is_some_and(|reg| !reg.is_export_from(symbol, source)) {
+        return None;
+    }
+
+    Some(ModelReference::new(symbol, infer_model_category(symbol), source))
+}
+
+/// Infers model category from canonical `ClickHome` symbol suffixes.
+#[inline]
+fn infer_model_category(symbol: &str) -> ModelCategory {
+    if symbol.ends_with(ModelCategory::ServiceCodeGen.suffix()) {
+        ModelCategory::ServiceCodeGen
+    } else if symbol.ends_with(ModelCategory::CodeGenFormArray.suffix()) {
+        ModelCategory::CodeGenFormArray
+    } else if symbol.ends_with(ModelCategory::CodeGenForApi.suffix()) {
+        ModelCategory::CodeGenForApi
+    } else if symbol.ends_with(ModelCategory::CodeGenForm.suffix()) {
+        ModelCategory::CodeGenForm
+    } else if symbol.ends_with(ModelCategory::CodeGen.suffix()) {
+        ModelCategory::CodeGen
+    } else if symbol.ends_with(ModelCategory::Service.suffix()) {
+        ModelCategory::Service
+    } else if symbol.ends_with(ModelCategory::Interface.suffix()) {
+        ModelCategory::Interface
+    } else {
+        ModelCategory::Model
+    }
+}
+
+#[inline]
+fn push_unique_model_ref(
+    model_refs: &mut SmallVec<[ModelReference; 4]>,
+    seen: &mut FxHashSet<(String, ModelCategory, ModelSource)>,
+    model_ref: ModelReference,
+) {
+    let key = (model_ref.name.clone(), model_ref.category, model_ref.source);
+    if seen.insert(key) {
+        model_refs.push(model_ref);
     }
 }
 
@@ -429,8 +516,13 @@ fn hash_path(path: &Utf8Path) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
-    use ch_core::{ImportKind, SourceLocation};
+    use camino::Utf8PathBuf;
+    use ch_core::{EdgeKind, ImportKind, ModelDefinition, SourceLocation};
+    use smallvec::smallvec;
 
     fn make_import(source: Option<ModelSource>) -> ImportInfo {
         ImportInfo::new(
@@ -503,5 +595,116 @@ mod tests {
         let hash1 = hash_path(Utf8Path::new("src/foo.ts"));
         let hash2 = hash_path(Utf8Path::new("src/bar.ts"));
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_infer_model_category_suffixes() {
+        assert_eq!(infer_model_category("Order"), ModelCategory::Model);
+        assert_eq!(infer_model_category("OrderModel"), ModelCategory::Interface);
+        assert_eq!(infer_model_category("OrderCodeGen"), ModelCategory::CodeGen);
+        assert_eq!(infer_model_category("OrderCodeGenForApi"), ModelCategory::CodeGenForApi);
+        assert_eq!(infer_model_category("OrderCodeGenForm"), ModelCategory::CodeGenForm);
+        assert_eq!(infer_model_category("OrderCodeGenFormArray"), ModelCategory::CodeGenFormArray);
+        assert_eq!(infer_model_category("OrderService"), ModelCategory::Service);
+        assert_eq!(infer_model_category("OrderServiceCodeGen"), ModelCategory::ServiceCodeGen);
+    }
+
+    #[test]
+    fn test_build_model_refs_deduplicates_import_and_relation_overlap() {
+        let imports = [ImportInfo::new(
+            "../shared/models/order",
+            ImportKind::Named,
+            smallvec!["OrderModel".to_owned()],
+            Some(ModelSource::SharedLegacy),
+            SourceLocation::default(),
+        )];
+
+        let relations = [AstRelationEvidence::new(
+            EdgeKind::Constructs,
+            ModelReference::new("CustomerModel", ModelCategory::Model, ModelSource::SharedLegacy),
+            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy),
+        )];
+
+        let model_refs = build_model_refs(&imports, &relations, None);
+        assert_eq!(model_refs.len(), 2);
+        assert_eq!(model_refs[0].name, "OrderModel");
+        assert_eq!(model_refs[1].name, "CustomerModel");
+    }
+
+    #[test]
+    fn test_analyze_single_populates_model_refs_and_relation_evidence() {
+        let source = r#"
+import { OrderModel } from "../shared/models/order";
+
+class CustomerModel {
+  createOrder(): OrderModel {
+    return new OrderModel();
+  }
+}
+"#;
+        let file_path = write_temp_typescript_file(source, "ts");
+        let analyzer = FileAnalyzer::new();
+        let matcher = ModelPathMatcher::default();
+        let result = analyzer.analyze_single(&file_path, &matcher, None);
+
+        assert!(result.is_ok());
+        let file = match result {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+
+        assert_eq!(file.status, MigrationStatus::Legacy);
+        assert!(!file.model_refs.is_empty());
+        assert!(file.model_refs.iter().any(|model| model.name == "OrderModel"));
+        assert!(!file.relation_evidence.is_empty());
+
+        let _ = fs::remove_file(file_path.as_std_path());
+    }
+
+    #[test]
+    fn test_analyze_single_registry_filters_unknown_import_symbols() {
+        let source = r#"
+import { OrderModel, UtilityThing } from "../shared/models/order";
+"#;
+        let file_path = write_temp_typescript_file(source, "ts");
+        let analyzer = FileAnalyzer::new();
+        let matcher = ModelPathMatcher::default();
+
+        let mut registry = ModelRegistry::new();
+        registry.register(ModelDefinition {
+            name: "Order".to_owned(),
+            source: ModelSource::SharedLegacy,
+            definition_path: Utf8PathBuf::from("shared/models/order.ts"),
+            exports: smallvec!["OrderModel".to_owned()],
+        });
+
+        let result = analyzer.analyze_single(&file_path, &matcher, Some(&registry));
+        assert!(result.is_ok());
+        let file = match result {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+
+        assert_eq!(file.status, MigrationStatus::Legacy);
+        assert_eq!(file.model_refs.len(), 1);
+        assert_eq!(file.model_refs[0].name, "OrderModel");
+
+        let _ = fs::remove_file(file_path.as_std_path());
+    }
+
+    fn write_temp_typescript_file(contents: &str, extension: &str) -> Utf8PathBuf {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let std_path =
+            std::env::temp_dir().join(format!("ch_scanner_analyzer_{unique_id}.{extension}"));
+        let write_result = fs::write(&std_path, contents);
+        assert!(write_result.is_ok());
+
+        let utf8_path = Utf8PathBuf::from_path_buf(std_path);
+        assert!(utf8_path.is_ok());
+
+        utf8_path.unwrap_or_default()
     }
 }
