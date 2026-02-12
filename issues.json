@@ -5,18 +5,5 @@
     "query": "project = \"H5 Migration\" AND status = \"Backlog\""
   },
   "orderingStrategy": "topological-sort-by-blockedBy",
-  "orderedIssues": [
-    {
-      "sequence": 11,
-      "id": "5fbd2528-b0a5-4469-8446-11b2bf367035",
-      "identifier": "QUA-133",
-      "title": "[Phase 2, non-blocking] Add `ch-tui` graph summary and dependency drilldown views",
-      "url": "https://linear.app/quantumqores/issue/QUA-133/phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency-drilldown",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-130"
-      ],
-      "blocks": []
-    }
-  ]
+  "orderedIssues": []
 }

@@ -2,81 +2,73 @@
 
 ## Loop Metadata
 
-- Status: Running
+- Status: Done
 - Iteration: 3
-- Last Updated (UTC): 2026-02-12T04:27:43Z
+- Last Updated (UTC): 2026-02-12T05:47:30Z
 - Ordering Strategy: `topological-sort-by-blockedBy`
-- Current Branch: patelksharad/qua-132-deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots
-- Current Workflow Step: Step 12/13 complete for QUA-132 (ready for next ticket iteration)
-- End Signal: `END_ITERATION`
+- Current Branch: patelksharad/qua-133-phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency
+- Current Workflow Step: Step 12 complete (merge/PR pending)
+- End Signal: END_ISSUES
 
 ## Ticket In Progress
 
-- Ticket: QUA-132
-- URL: https://linear.app/quantumqores/issue/QUA-132/deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots-for-graph
-- Branch: `patelksharad/qua-132-deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots`
-- Linear plan comment: `7b6e3b92-781b-4537-84b0-f414f32386dd`
-- Linear completion comment: `041422da-8ea7-4b39-a5bd-ce2c2a399fd0`
+- Ticket: QUA-133 (completed)
+- URL: https://linear.app/quantumqores/issue/QUA-133/phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency-drilldown
+- Branch: patelksharad/qua-133-phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency
+- Linear plan comment: 9879a072-acc5-4377-9fdf-9da0a4537314
+- Linear completion comment: 839a8199-d365-467d-8f53-4031650bf3eb
 - Linear status: Done
 
 ## Ordered Queue Snapshot
 
-- `orderedIssues`: [`QUA-133`]
+- `orderedIssues`: []
 
 ## Accomplished This Iteration
 
-1. Read loop context from `RALPH_STATUS.md` and selected queue head `QUA-132` from `issues.json`.
-2. Pulled full Linear context + comments for `QUA-132` and verified blockers `QUA-130`/`QUA-131` were `Done`.
-3. Performed provenance research with Ref MCP + Exa MCP for snapshot/redaction guidance.
-4. Added mixed legacy/modern consumer file to `ng15-mini` fixture to ensure relation + plan coverage.
-5. Documented fixture trimming and refresh workflow in `test-fixtures/graph-planner/README.md`.
-6. Added golden contract summary snapshot for graph/planner artifact schema.
-7. Added graph planner test matrix doc mapping acceptance coverage to tests.
-8. Added CLI E2E tests for contract summary + reproducibility loop on ng15-mini fixture.
-9. Ran required validations successfully:
-   - `cargo check --workspace`
-   - `cargo clippy --workspace`
-10. Committed and pushed changes:
-    - Commit: `6b47515`
-    - Push: `origin/patelksharad/qua-132-deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots`
-11. Removed `QUA-132` from `issues.json` ordered queue.
-12. Posted Linear completion evidence comment and transitioned `QUA-132` to `Done`.
+1. Loaded Linear issue data and posted implementation plan.
+2. Implemented graph artifacts loader and graph view state.
+3. Added graph summary panel, model list, and drilldown components with dependency/evidence/plan context.
+4. Added view toggle, status bar view indicator, help binding, and UI layout row for graph summary.
+5. Added tests for graph artifacts parsing and component line builders.
+6. Ran `cargo check --workspace` and `cargo clippy --workspace`.
+7. Updated `issues.json` to remove QUA-133 and transitioned ticket to Done with completion comment.
 
 ## Verification Evidence
 
 - `cargo check --workspace` ✅
 - `cargo clippy --workspace` ✅
-- `git commit`: `6b47515` ✅
-- Linear plan comment created ✅
-- Linear completion comment created ✅
-- Linear status transition to `Done` ✅
-- `issues.json` updated with `QUA-132` removed ✅
-- `git push -u origin patelksharad/qua-132-deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots` ✅
+- Linear plan comment: `9879a072-acc5-4377-9fdf-9da0a4537314`
+- Linear completion comment: `839a8199-d365-467d-8f53-4031650bf3eb`
+- Linear status: Done
+- `issues.json` queue empty ✅
 
 ## Last Error
 
-- `git pull` failed: no upstream tracking information for branch. Resolved by push with `-u`.
+(none)
 
 ## Blockers & Notes
 
-- No active blockers for `QUA-132`.
-- Next queue head is `QUA-133`.
+- Graph artifacts expected at `./graph-artifacts` (default `ch-migrate graph` output).
+- Merge/PR not created yet (pending milestone branch context).
 
 ## Files Modified
 
-- `crates/ch-cli/src/main.rs`
-- `docs/graph-planner-test-matrix.md`
-- `test-fixtures/graph-planner/README.md`
-- `test-fixtures/graph-planner/golden/ng15-mini/contract-summary.json`
-- `test-fixtures/graph-planner/ng15-mini/app/features/collection-consumer.ts`
-- `test-fixtures/graph-planner/ng15-mini/app/shared/**`
-- `test-fixtures/graph-planner/ng15-mini/app/shared_2023/**`
-- `test-fixtures/graph-planner/ng15-mini/app/components/document/models/**`
-- `issues.json`
-- `RALPH_STATUS.md`
+- Cargo.lock
+- crates/ch-tui/Cargo.toml
+- crates/ch-tui/src/action.rs
+- crates/ch-tui/src/app.rs
+- crates/ch-tui/src/components/graph_summary.rs
+- crates/ch-tui/src/components/model_drilldown.rs
+- crates/ch-tui/src/components/help.rs
+- crates/ch-tui/src/components/mod.rs
+- crates/ch-tui/src/components/status_bar.rs
+- crates/ch-tui/src/graph_artifacts.rs
+- crates/ch-tui/src/lib.rs
+- crates/ch-tui/src/ui.rs
+- issues.json
+- RALPH_STATUS.md
 
 ## Git Summary
 
-- Branch: `patelksharad/qua-132-deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots`
-- Feature commit: `6b47515`
-- Pushed: `origin/patelksharad/qua-132-deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots`
+- Branch: `patelksharad/qua-133-phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency`
+- Uncommitted: (pending)

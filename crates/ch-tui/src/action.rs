@@ -107,6 +107,9 @@ pub enum Action {
     /// Toggle the help panel.
     ToggleHelp,
 
+    /// Toggle between file and graph views.
+    ToggleView,
+
     /// Show the help panel.
     ShowHelp,
 

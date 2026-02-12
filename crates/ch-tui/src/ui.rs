@@ -25,10 +25,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Clear, Widget};
 
-use crate::app::{App, AppMode};
+use crate::app::{App, AppMode, ViewMode};
 use crate::components::{
-    DetailPane, DirectoryInput, FileListView, FilterInput, HeaderBar, HelpPanel, StatsPanel,
-    StatusBar,
+    DetailPane, DirectoryInput, FileListView, FilterInput, GraphSummaryPanel, HeaderBar, HelpPanel,
+    ModelDrilldown, ModelListView, StatsPanel, StatusBar,
 };
 use crate::theme::Theme;
 
@@ -40,6 +40,7 @@ pub fn render(app: &mut App, frame: &mut Frame, theme: &Theme) {
     // Main vertical layout:
     // - Header (2 lines)
     // - Stats Panel (2 lines)
+    // - Graph Summary (3 lines)
     // - Main Content (flexible)
     // - Status Bar (1 line)
     let main_chunks = Layout::default()
@@ -47,6 +48,7 @@ pub fn render(app: &mut App, frame: &mut Frame, theme: &Theme) {
         .constraints([
             Constraint::Length(2), // Header
             Constraint::Length(2), // Stats
+            Constraint::Length(3), // Graph summary
             Constraint::Min(6),    // Main content
             Constraint::Length(1), // Status bar
         ])
@@ -60,12 +62,17 @@ pub fn render(app: &mut App, frame: &mut Frame, theme: &Theme) {
     let stats_panel = StatsPanel::new(&app.stats, &app.scan_state, theme);
     frame.render_widget(&stats_panel, main_chunks[1]);
 
+    // Render graph summary panel
+    let (summary, error) = app.graph_summary_data();
+    let graph_summary = GraphSummaryPanel::new(summary, error, theme);
+    frame.render_widget(&graph_summary, main_chunks[2]);
+
     // Render main content (file list + details)
-    render_main_content(app, frame, main_chunks[2], theme);
+    render_main_content(app, frame, main_chunks[3], theme);
 
     // Render status bar
     let status_bar = StatusBar::new(app, theme);
-    frame.render_widget(&status_bar, main_chunks[3]);
+    frame.render_widget(&status_bar, main_chunks[4]);
 
     // Render filter input overlay if in filter mode
     if app.mode == AppMode::Filtering {
@@ -91,24 +98,47 @@ pub fn render(app: &mut App, frame: &mut Frame, theme: &Theme) {
 
 /// Renders the main content area (file list and detail pane).
 fn render_main_content(app: &mut App, frame: &mut Frame, area: Rect, theme: &Theme) {
-    // Split horizontally: file list (60%) | details (40%)
+    match app.view_mode {
+        ViewMode::Files => render_file_content(app, frame, area, theme),
+        ViewMode::Graph => render_graph_content(app, frame, area, theme),
+    }
+}
+
+fn render_file_content(app: &mut App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let content_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
-    // Render file list with persistent state.
     {
         let (files, filter_active, focused, state) = app.file_list_render_data();
         let file_list = FileListView::new(files, filter_active, focused, theme);
         frame.render_stateful_widget(&file_list, content_chunks[0], state);
     }
 
-    // Render detail pane with persistent scroll state.
     {
         let (selected_file, focused, state) = app.detail_render_data();
         let detail_pane = DetailPane::new(selected_file, focused, theme);
         frame.render_stateful_widget(&detail_pane, content_chunks[1], state);
+    }
+}
+
+fn render_graph_content(app: &mut App, frame: &mut Frame, area: Rect, theme: &Theme) {
+    let content_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(area);
+
+    {
+        let (nodes, focused, state) = app.graph_list_render_data();
+        let list = ModelListView::new(nodes, focused, theme);
+        frame.render_stateful_widget(&list, content_chunks[0], state);
+    }
+
+    {
+        let (artifacts, selected, focused, state) = app.graph_drilldown_render_data();
+        let drilldown = ModelDrilldown::new(artifacts, selected, focused, theme);
+        frame.render_stateful_widget(&drilldown, content_chunks[1], state);
     }
 }
 

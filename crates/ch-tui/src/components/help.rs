@@ -29,6 +29,7 @@ const KEY_BINDINGS: &[KeyBinding] = &[
     KeyBinding { key: "G / End", description: "Go to last file", mode: "Normal" },
     KeyBinding { key: "PgDn / PgUp", description: "Page down / up", mode: "Normal" },
     KeyBinding { key: "Tab", description: "Toggle focus (List/Details)", mode: "Normal" },
+    KeyBinding { key: "v", description: "Toggle view (Files/Graph)", mode: "Normal" },
     // Filtering
     KeyBinding { key: "/", description: "Filter path/model (= exact)", mode: "Normal" },
     KeyBinding { key: "f", description: "Cycle status filter", mode: "Normal" },

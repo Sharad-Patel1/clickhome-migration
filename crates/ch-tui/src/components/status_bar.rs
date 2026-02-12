@@ -49,6 +49,17 @@ impl<'a> StatusBar<'a> {
         ));
         spans.push(Span::raw(" "));
 
+        // View indicator
+        let view_text = match self.app.view_mode {
+            crate::app::ViewMode::Files => "FILES",
+            crate::app::ViewMode::Graph => "GRAPH",
+        };
+        spans.push(Span::styled(
+            format!(" {view_text} "),
+            Style::default().fg(Color::Black).bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" "));
+
         // Status message
         if let Some(ref status) = self.app.status {
             let style = if status.is_error {
@@ -78,10 +89,7 @@ impl<'a> StatusBar<'a> {
 
         // Sort indicator
         spans.push(Span::styled("Sort: ", Style::default().fg(Color::DarkGray)));
-        spans.push(Span::styled(
-            self.app.sort_mode().label(),
-            Style::default().fg(Color::Cyan),
-        ));
+        spans.push(Span::styled(self.app.sort_mode().label(), Style::default().fg(Color::Cyan)));
         spans.push(Span::raw(" │ "));
 
         // File count
