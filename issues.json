@@ -7,21 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 5,
-      "id": "df03d9c6-b1d9-46fd-b334-a49cfc75dcf5",
-      "identifier": "QUA-127",
-      "title": "Implement old-vs-new model mapping and residual legacy usage diff",
-      "url": "https://linear.app/quantumqores/issue/QUA-127/implement-old-vs-new-model-mapping-and-residual-legacy-usage-diff",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-124",
-        "QUA-126"
-      ],
-      "blocks": [
-        "QUA-128"
-      ]
-    },
-    {
       "sequence": 6,
       "id": "33640e0d-a10b-43f1-8f0c-93d51385429b",
       "identifier": "QUA-128",
