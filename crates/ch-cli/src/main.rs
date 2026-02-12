@@ -23,15 +23,20 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
+use ch_graph::{
+    build_inventory, export_artifacts, DependencyGraphBuilder, GraphArtifactFormat,
+    GraphArtifactSnapshotMode, GraphComparator, GraphPlanner, PlannerConfig,
+};
 use ch_scanner::{ScanConfig as ScannerConfig, Scanner, StatsSnapshot};
-use ch_ts_parser::ModelPathMatcher;
+use ch_ts_parser::{parser_version, relation_query_version, ModelPathMatcher};
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing::info;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 // =============================================================================
 // CLI ARGUMENT TYPES
@@ -114,6 +119,25 @@ enum Commands {
         #[arg(short, long)]
         output: Option<Utf8PathBuf>,
     },
+
+    /// Build dependency graph and migration plan artifacts.
+    Graph {
+        /// Output directory for generated graph and plan artifacts.
+        #[arg(long, default_value = "./graph-artifacts")]
+        output_dir: Utf8PathBuf,
+
+        /// Snapshot detail level used for artifact payloads.
+        #[arg(long, value_enum, default_value_t = GraphSnapshotMode::Minimal)]
+        snapshot_mode: GraphSnapshotMode,
+
+        /// Output format selection.
+        #[arg(long, value_enum, default_value_t = GraphOutputFormat::All)]
+        format: GraphOutputFormat,
+
+        /// Optional cap on emitted migration plan steps.
+        #[arg(long)]
+        max_steps: Option<usize>,
+    },
 }
 
 /// Report output format.
@@ -123,6 +147,28 @@ enum ReportFormat {
     Json,
     /// CSV format.
     Csv,
+}
+
+/// Snapshot detail mode for graph artifacts.
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum GraphSnapshotMode {
+    /// Emit compact summary-focused artifacts.
+    Minimal,
+    /// Emit expanded artifacts with node/edge and evidence detail.
+    Full,
+}
+
+/// Graph artifact output format selection.
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum GraphOutputFormat {
+    /// Emit JSON artifacts.
+    Json,
+    /// Emit Graphviz DOT artifacts.
+    Dot,
+    /// Emit Markdown artifacts.
+    Md,
+    /// Emit all supported artifact formats.
+    All,
 }
 
 // =============================================================================
@@ -149,7 +195,12 @@ fn init_tracing(verbose: bool, no_color: bool, is_tui: bool) -> Option<WorkerGua
     if is_tui {
         let (writer, guard) = create_watch_log_writer();
         tracing_subscriber::registry()
-            .with(fmt::layer().with_target(false).with_ansi(false).with_writer(writer))
+            .with(
+                fmt::layer()
+                    .with_target(false)
+                    .with_ansi(false)
+                    .with_writer(writer),
+            )
             .with(filter)
             .init();
         Some(guard)
@@ -206,7 +257,10 @@ fn split_log_path(path: &Path) -> (PathBuf, String) {
 ///
 /// Returns an error if the path is not provided, doesn't exist, or isn't a directory.
 fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Config> {
-    let path = cli.path.clone().unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
+    let path = cli
+        .path
+        .clone()
+        .unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
 
     // Validate path exists
     if !path.exists() {
@@ -220,16 +274,20 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
 
     let mut config = Config::default();
     config.scan.root_path = path;
-    config.scan.shared_path =
-        cli.shared_path.clone().unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
+    config.scan.shared_path = cli
+        .shared_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
     config.scan.shared_2023_path = cli
         .shared_2023_path
         .clone()
         .unwrap_or_else(|| config.scan.root_path.join("app").join("shared_2023"));
 
     // Set app_path: use CLI arg or default to ./WebApp.Desktop/src/app
-    config.scan.app_path =
-        cli.app_path.clone().unwrap_or_else(|| config.scan.root_path.join("app"));
+    config.scan.app_path = cli
+        .app_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join("app"));
 
     if let Some(name) = config.scan.shared_path.file_name() {
         config.scan.shared_dir = name.to_owned();
@@ -240,7 +298,11 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
     config.editor.editor.clone_from(&cli.editor);
 
     validate_dir(&config.scan.shared_path, "shared", require_shared_paths)?;
-    validate_dir(&config.scan.shared_2023_path, "shared_2023", require_shared_paths)?;
+    validate_dir(
+        &config.scan.shared_2023_path,
+        "shared_2023",
+        require_shared_paths,
+    )?;
     // app_path is always required since we scan it for model consumers
     validate_dir(&config.scan.app_path, "app", true)?;
 
@@ -250,20 +312,26 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
 fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::Result<()> {
     if path.as_str().is_empty() {
         if required {
-            return Err(color_eyre::eyre::eyre!("{label} path is required but missing."));
+            return Err(color_eyre::eyre::eyre!(
+                "{label} path is required but missing."
+            ));
         }
         return Ok(());
     }
 
     if !path.exists() {
         if required {
-            return Err(color_eyre::eyre::eyre!("{label} path does not exist: {path}"));
+            return Err(color_eyre::eyre::eyre!(
+                "{label} path does not exist: {path}"
+            ));
         }
         return Ok(());
     }
 
     if !path.is_dir() {
-        return Err(color_eyre::eyre::eyre!("{label} path is not a directory: {path}"));
+        return Err(color_eyre::eyre::eyre!(
+            "{label} path is not a directory: {path}"
+        ));
     }
 
     Ok(())
@@ -277,10 +345,14 @@ fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::
 /// # Errors
 ///
 /// Returns an error if the scanner cannot be created.
-fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
+fn create_scanner(config: &Config, use_registry: bool) -> color_eyre::Result<Scanner> {
     // Use app_path for scanning (not root_path) to restrict to application code only
-    let scanner_config =
+    let mut scanner_config =
         ScannerConfig::new(&config.scan.app_path).with_skip_dirs(&["node_modules", "dist", ".git"]);
+    if use_registry {
+        scanner_config = scanner_config
+            .with_shared_paths(&config.scan.shared_path, &config.scan.shared_2023_path);
+    }
     let matcher = ModelPathMatcher::from_scan_config(&config.scan);
 
     Scanner::new_with_matcher(scanner_config, matcher)
@@ -304,7 +376,7 @@ fn create_scanner(config: &Config) -> color_eyre::Result<Scanner> {
 fn run_scan(config: &Config, detailed: bool) -> color_eyre::Result<()> {
     info!(app_path = %config.scan.app_path, "Starting scan");
 
-    let scanner = create_scanner(config)?;
+    let scanner = create_scanner(config, false)?;
     let result = scanner.scan()?;
 
     print_stats_summary(&result.stats);
@@ -340,7 +412,7 @@ fn run_scan(config: &Config, detailed: bool) -> color_eyre::Result<()> {
 async fn run_watch(config: Config, no_watch: bool) -> color_eyre::Result<()> {
     info!(app_path = %config.scan.app_path, watch = !no_watch, "Starting TUI");
 
-    let scanner = create_scanner(&config)?;
+    let scanner = create_scanner(&config, false)?;
 
     let mut config = config;
     config.watch.enabled = !no_watch;
@@ -348,7 +420,7 @@ async fn run_watch(config: Config, no_watch: bool) -> color_eyre::Result<()> {
     // Handle SIGTERM for graceful shutdown on Unix
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{SignalKind, signal};
+        use tokio::signal::unix::{signal, SignalKind};
 
         let mut sigterm = signal(SignalKind::terminate())?;
 
@@ -390,7 +462,7 @@ fn run_report(
 ) -> color_eyre::Result<()> {
     info!(app_path = %config.scan.app_path, "Generating report");
 
-    let scanner = create_scanner(config)?;
+    let scanner = create_scanner(config, false)?;
     let result = scanner.scan()?;
 
     let all_files = scanner.cache().all_files();
@@ -412,6 +484,129 @@ fn run_report(
     Ok(())
 }
 
+/// Builds dependency graph + migration plan artifacts.
+fn run_graph(
+    config: &Config,
+    output_dir: &Utf8PathBuf,
+    snapshot_mode: GraphSnapshotMode,
+    format: GraphOutputFormat,
+    max_steps: Option<usize>,
+) -> color_eyre::Result<()> {
+    if matches!(max_steps, Some(0)) {
+        return Err(color_eyre::eyre::eyre!(
+            "--max-steps must be greater than 0 when provided."
+        ));
+    }
+
+    if output_dir.exists() && !output_dir.is_dir() {
+        return Err(color_eyre::eyre::eyre!(
+            "output directory path is not a directory: {output_dir}"
+        ));
+    }
+
+    std::fs::create_dir_all(output_dir.as_std_path())?;
+
+    info!(
+        app_path = %config.scan.app_path,
+        shared_path = %config.scan.shared_path,
+        shared_2023_path = %config.scan.shared_2023_path,
+        output_dir = %output_dir,
+        snapshot_mode = ?snapshot_mode,
+        format = ?format,
+        max_steps = ?max_steps,
+        "Building graph artifacts"
+    );
+
+    let parse_phase_start = Instant::now();
+    let scanner = create_scanner(config, true)?;
+    let result = scanner.scan()?;
+    let all_files = scanner.cache().all_files();
+    let parse_phase_elapsed = parse_phase_start.elapsed();
+
+    let graph_phase_start = Instant::now();
+    let inventory = build_inventory(scanner.registry());
+    let graph = DependencyGraphBuilder::new()
+        .with_source_roots(vec![
+            config.scan.root_path.clone(),
+            config.scan.app_path.clone(),
+            config.scan.shared_path.clone(),
+            config.scan.shared_2023_path.clone(),
+        ])
+        .with_parser_metadata(
+            Some(parser_version().to_owned()),
+            Some(relation_query_version().to_owned()),
+        )
+        .build(&inventory, &all_files);
+    let diff = GraphComparator::new().compare(&inventory, &all_files);
+    let graph_phase_elapsed = graph_phase_start.elapsed();
+
+    let plan_phase_start = Instant::now();
+    let planner = GraphPlanner::with_config(PlannerConfig {
+        max_steps,
+        ..PlannerConfig::default()
+    });
+    let plan = planner.plan(&graph, &diff);
+    let plan_phase_elapsed = plan_phase_start.elapsed();
+
+    let written = export_artifacts(
+        output_dir.as_path(),
+        artifact_snapshot_mode(snapshot_mode),
+        artifact_format(format),
+        &graph,
+        &diff,
+        &plan,
+    )?;
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    writeln!(out, "Graph artifacts written to: {output_dir}")?;
+    for path in &written {
+        writeln!(out, "  {}", path.as_str())?;
+    }
+    writeln!(
+        out,
+        "Graph summary: {} nodes, {} edges, {} plan steps",
+        graph.node_count(),
+        graph.edge_count(),
+        plan.steps.len()
+    )?;
+    writeln!(
+        out,
+        "Runtime summary: parse={}ms graph={}ms plan={}ms",
+        parse_phase_elapsed.as_millis(),
+        graph_phase_elapsed.as_millis(),
+        plan_phase_elapsed.as_millis()
+    )?;
+
+    if !result.errors.is_empty() {
+        let stderr = std::io::stderr();
+        let mut err = stderr.lock();
+        writeln!(
+            err,
+            "Scan completed with {} non-fatal file errors while building graph artifacts.",
+            result.errors.len()
+        )?;
+    }
+
+    Ok(())
+}
+
+const fn artifact_snapshot_mode(mode: GraphSnapshotMode) -> GraphArtifactSnapshotMode {
+    match mode {
+        GraphSnapshotMode::Minimal => GraphArtifactSnapshotMode::Minimal,
+        GraphSnapshotMode::Full => GraphArtifactSnapshotMode::Full,
+    }
+}
+
+const fn artifact_format(format: GraphOutputFormat) -> GraphArtifactFormat {
+    match format {
+        GraphOutputFormat::Json => GraphArtifactFormat::Json,
+        GraphOutputFormat::Dot => GraphArtifactFormat::Dot,
+        GraphOutputFormat::Md => GraphArtifactFormat::Md,
+        GraphOutputFormat::All => GraphArtifactFormat::All,
+    }
+}
+
 // =============================================================================
 // OUTPUT HELPERS
 // =============================================================================
@@ -426,13 +621,29 @@ fn print_stats_summary(stats: &StatsSnapshot) {
     let _ = writeln!(handle, "========================");
     let _ = writeln!(handle);
     let _ = writeln!(handle, "Total files scanned: {}", stats.total);
-    let _ = writeln!(handle, "  Legacy:           {} (need migration)", stats.legacy);
-    let _ = writeln!(handle, "  Partial:          {} (in progress)", stats.partial);
+    let _ = writeln!(
+        handle,
+        "  Legacy:           {} (need migration)",
+        stats.legacy
+    );
+    let _ = writeln!(
+        handle,
+        "  Partial:          {} (in progress)",
+        stats.partial
+    );
     let _ = writeln!(handle, "  Migrated:         {} (complete)", stats.migrated);
-    let _ = writeln!(handle, "  No models:        {} (no action needed)", stats.no_models);
+    let _ = writeln!(
+        handle,
+        "  No models:        {} (no action needed)",
+        stats.no_models
+    );
     let _ = writeln!(handle, "  Errors:           {}", stats.errors);
     let _ = writeln!(handle);
-    let _ = writeln!(handle, "Migration progress: {:.1}%", stats.progress_percent());
+    let _ = writeln!(
+        handle,
+        "Migration progress: {:.1}%",
+        stats.progress_percent()
+    );
     let _ = writeln!(handle, "Files needing work: {}", stats.needs_migration());
 }
 
@@ -537,5 +748,624 @@ async fn main() -> color_eyre::Result<()> {
             let config = build_config(&cli, true)?;
             run_report(&config, *format, output.clone())
         }
+        Commands::Graph {
+            output_dir,
+            snapshot_mode,
+            format,
+            max_steps,
+        } => {
+            let config = build_config(&cli, true)?;
+            run_graph(&config, output_dir, *snapshot_mode, *format, *max_steps)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+    use serde_json::{json, Value};
+
+    #[test]
+    fn test_graph_command_defaults() {
+        let parsed = Cli::try_parse_from(["ch-migrate", "graph"]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            match cli.command {
+                Commands::Graph {
+                    output_dir,
+                    snapshot_mode,
+                    format,
+                    max_steps,
+                } => {
+                    assert_eq!(output_dir, Utf8PathBuf::from("./graph-artifacts"));
+                    assert_eq!(snapshot_mode, GraphSnapshotMode::Minimal);
+                    assert_eq!(format, GraphOutputFormat::All);
+                    assert!(max_steps.is_none());
+                }
+                _ => assert!(false),
+            }
+        }
+    }
+
+    #[test]
+    fn test_graph_command_accepts_custom_values_and_global_paths() {
+        let parsed = Cli::try_parse_from([
+            "ch-migrate",
+            "--path",
+            "/tmp/project/src",
+            "--shared-path",
+            "/tmp/project/src/app/shared",
+            "--shared-2023-path",
+            "/tmp/project/src/app/shared_2023",
+            "--app-path",
+            "/tmp/project/src/app",
+            "graph",
+            "--output-dir",
+            "/tmp/project/out",
+            "--snapshot-mode",
+            "full",
+            "--format",
+            "md",
+            "--max-steps",
+            "7",
+        ]);
+        assert!(parsed.is_ok());
+
+        if let Ok(cli) = parsed {
+            assert_eq!(cli.path, Some(Utf8PathBuf::from("/tmp/project/src")));
+            assert_eq!(
+                cli.shared_path,
+                Some(Utf8PathBuf::from("/tmp/project/src/app/shared"))
+            );
+            assert_eq!(
+                cli.shared_2023_path,
+                Some(Utf8PathBuf::from("/tmp/project/src/app/shared_2023"))
+            );
+            assert_eq!(
+                cli.app_path,
+                Some(Utf8PathBuf::from("/tmp/project/src/app"))
+            );
+
+            if let Commands::Graph {
+                output_dir,
+                snapshot_mode,
+                format,
+                max_steps,
+            } = cli.command
+            {
+                assert_eq!(output_dir, Utf8PathBuf::from("/tmp/project/out"));
+                assert_eq!(snapshot_mode, GraphSnapshotMode::Full);
+                assert_eq!(format, GraphOutputFormat::Md);
+                assert_eq!(max_steps, Some(7));
+            } else {
+                assert!(false);
+            }
+        }
+    }
+
+    #[test]
+    fn test_graph_help_mentions_graph_specific_options() {
+        let mut command = Cli::command();
+        let graph = command.find_subcommand_mut("graph");
+        assert!(graph.is_some());
+
+        if let Some(graph) = graph {
+            let mut help = Vec::new();
+            let write_result = graph.write_long_help(&mut help);
+            assert!(write_result.is_ok());
+            let help_text = String::from_utf8_lossy(&help);
+            assert!(help_text.contains("--output-dir"));
+            assert!(help_text.contains("--snapshot-mode"));
+            assert!(help_text.contains("--format"));
+            assert!(help_text.contains("--max-steps"));
+            assert!(help_text.contains("--shared-path"));
+            assert!(help_text.contains("--shared-2023-path"));
+            assert!(help_text.contains("--app-path"));
+        }
+    }
+
+    #[test]
+    fn test_existing_commands_still_parse() {
+        assert!(Cli::try_parse_from(["ch-migrate", "scan"]).is_ok());
+        assert!(Cli::try_parse_from(["ch-migrate", "watch"]).is_ok());
+        assert!(Cli::try_parse_from(["ch-migrate", "report"]).is_ok());
+    }
+
+    #[test]
+    fn test_run_graph_writes_all_artifacts() {
+        let root = create_temp_project("graph-all");
+        let output_dir = root.join("out-all");
+        let config = fixture_config(&root);
+        assert!(config.is_ok());
+
+        if let Ok(config) = config {
+            let run_result = run_graph(
+                &config,
+                &output_dir,
+                GraphSnapshotMode::Full,
+                GraphOutputFormat::All,
+                Some(8),
+            );
+            assert!(run_result.is_ok());
+
+            assert!(output_dir.join("graph.json").exists());
+            assert!(output_dir.join("migration-plan.json").exists());
+            assert!(output_dir.join("graph.dot").exists());
+            assert!(output_dir.join("migration-plan.md").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
+        }
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_run_graph_respects_json_only_format_selection() {
+        let root = create_temp_project("graph-json");
+        let output_dir = root.join("out-json");
+        let config = fixture_config(&root);
+        assert!(config.is_ok());
+
+        if let Ok(config) = config {
+            let run_result = run_graph(
+                &config,
+                &output_dir,
+                GraphSnapshotMode::Minimal,
+                GraphOutputFormat::Json,
+                Some(4),
+            );
+            assert!(run_result.is_ok());
+
+            assert!(output_dir.join("graph.json").exists());
+            assert!(output_dir.join("migration-plan.json").exists());
+            assert!(!output_dir.join("graph.dot").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
+            assert!(!output_dir.join("migration-plan.md").exists());
+        }
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_run_graph_respects_dot_only_format_selection() {
+        let root = create_temp_project("graph-dot");
+        let output_dir = root.join("out-dot");
+        let config = fixture_config(&root);
+        assert!(config.is_ok());
+
+        if let Ok(config) = config {
+            let run_result = run_graph(
+                &config,
+                &output_dir,
+                GraphSnapshotMode::Minimal,
+                GraphOutputFormat::Dot,
+                Some(4),
+            );
+            assert!(run_result.is_ok());
+
+            assert!(!output_dir.join("graph.json").exists());
+            assert!(!output_dir.join("migration-plan.json").exists());
+            assert!(output_dir.join("graph.dot").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
+            assert!(!output_dir.join("migration-plan.md").exists());
+        }
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_run_graph_respects_markdown_only_format_selection() {
+        let root = create_temp_project("graph-md");
+        let output_dir = root.join("out-md");
+        let config = fixture_config(&root);
+        assert!(config.is_ok());
+
+        if let Ok(config) = config {
+            let run_result = run_graph(
+                &config,
+                &output_dir,
+                GraphSnapshotMode::Full,
+                GraphOutputFormat::Md,
+                Some(4),
+            );
+            assert!(run_result.is_ok());
+
+            assert!(!output_dir.join("graph.json").exists());
+            assert!(!output_dir.join("migration-plan.json").exists());
+            assert!(!output_dir.join("graph.dot").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
+            assert!(output_dir.join("migration-plan.md").exists());
+        }
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_ng15_fixture_contract_summary_matches_golden_snapshot() {
+        let fixture_root = graph_fixture_root();
+        assert!(fixture_root.exists());
+
+        let output_dir = create_temp_output_dir("graph-ng15-contract");
+        let config = fixture_config_for_root(&fixture_root);
+        assert!(config.is_ok());
+        let Some(config) = config.ok() else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+
+        let run_result = run_graph(
+            &config,
+            &output_dir,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        assert!(run_result.is_ok());
+
+        let graph_json = read_json_file(output_dir.join("graph.json").as_path());
+        let plan_json = read_json_file(output_dir.join("migration-plan.json").as_path());
+        let markdown =
+            std::fs::read_to_string(output_dir.join("migration-plan.md").as_std_path()).ok();
+        assert!(graph_json.is_some());
+        assert!(plan_json.is_some());
+        assert!(markdown.is_some());
+
+        let Some(graph_json) = graph_json else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+        let Some(plan_json) = plan_json else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+        let Some(markdown) = markdown else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+
+        let summary = contract_summary(&graph_json, &plan_json, &markdown);
+        let expected_path = workspace_root()
+            .join("test-fixtures/graph-planner/golden/ng15-mini/contract-summary.json");
+        let expected = read_json_file(expected_path.as_path());
+        assert!(expected.is_some());
+        if let Some(expected) = expected {
+            assert_eq!(summary, expected);
+        }
+
+        let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+    }
+
+    #[test]
+    fn test_ng15_fixture_artifacts_are_reproducible_across_repeated_runs() {
+        let fixture_root = graph_fixture_root();
+        assert!(fixture_root.exists());
+        let config = fixture_config_for_root(&fixture_root);
+        assert!(config.is_ok());
+        let Some(config) = config.ok() else {
+            return;
+        };
+
+        let out_a = create_temp_output_dir("graph-ng15-determinism-a");
+        let out_b = create_temp_output_dir("graph-ng15-determinism-b");
+        let out_c = create_temp_output_dir("graph-ng15-determinism-c");
+
+        let run_a = run_graph(
+            &config,
+            &out_a,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        let run_b = run_graph(
+            &config,
+            &out_b,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        let run_c = run_graph(
+            &config,
+            &out_c,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        assert!(run_a.is_ok());
+        assert!(run_b.is_ok());
+        assert!(run_c.is_ok());
+
+        let normalized_a = normalized_artifacts(&out_a);
+        let normalized_b = normalized_artifacts(&out_b);
+        let normalized_c = normalized_artifacts(&out_c);
+        assert!(normalized_a.is_some());
+        assert!(normalized_b.is_some());
+        assert!(normalized_c.is_some());
+
+        if let (Some(normalized_a), Some(normalized_b), Some(normalized_c)) =
+            (normalized_a, normalized_b, normalized_c)
+        {
+            assert_eq!(normalized_a.0, normalized_b.0);
+            assert_eq!(normalized_b.0, normalized_c.0);
+
+            assert_eq!(normalized_a.1, normalized_b.1);
+            assert_eq!(normalized_b.1, normalized_c.1);
+
+            assert_eq!(normalized_a.2, normalized_b.2);
+            assert_eq!(normalized_b.2, normalized_c.2);
+        }
+
+        let _ = std::fs::remove_dir_all(out_a.as_std_path());
+        let _ = std::fs::remove_dir_all(out_b.as_std_path());
+        let _ = std::fs::remove_dir_all(out_c.as_std_path());
+    }
+
+    fn fixture_config(root: &Utf8PathBuf) -> color_eyre::Result<Config> {
+        let cli = Cli {
+            command: Commands::Graph {
+                output_dir: root.join("out"),
+                snapshot_mode: GraphSnapshotMode::Minimal,
+                format: GraphOutputFormat::All,
+                max_steps: None,
+            },
+            path: Some(root.clone()),
+            shared_path: None,
+            shared_2023_path: None,
+            app_path: None,
+            verbose: false,
+            no_color: true,
+            editor: None,
+        };
+        build_config(&cli, true)
+    }
+
+    fn fixture_config_for_root(root: &Utf8PathBuf) -> color_eyre::Result<Config> {
+        let cli = Cli {
+            command: Commands::Graph {
+                output_dir: root.join("out"),
+                snapshot_mode: GraphSnapshotMode::Minimal,
+                format: GraphOutputFormat::All,
+                max_steps: Some(32),
+            },
+            path: Some(root.clone()),
+            shared_path: None,
+            shared_2023_path: None,
+            app_path: None,
+            verbose: false,
+            no_color: true,
+            editor: None,
+        };
+        build_config(&cli, true)
+    }
+
+    fn workspace_root() -> Utf8PathBuf {
+        let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(root) = manifest_dir.parent().and_then(Utf8Path::parent) {
+            return root.to_path_buf();
+        }
+        Utf8PathBuf::from(".")
+    }
+
+    fn graph_fixture_root() -> Utf8PathBuf {
+        workspace_root().join("test-fixtures/graph-planner/ng15-mini")
+    }
+
+    fn create_temp_output_dir(suffix: &str) -> Utf8PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let root_std = std::env::temp_dir().join(format!("ch-migrate-{suffix}-{nanos}"));
+        let root = Utf8PathBuf::from_path_buf(root_std)
+            .unwrap_or_else(|_| Utf8PathBuf::from(format!("/tmp/ch-migrate-{suffix}-{nanos}")));
+        let _ = std::fs::create_dir_all(root.as_std_path());
+        root
+    }
+
+    fn read_json_file(path: &Utf8Path) -> Option<Value> {
+        let raw = std::fs::read_to_string(path.as_std_path()).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    fn normalized_artifacts(output_dir: &Utf8PathBuf) -> Option<(String, String, String)> {
+        let graph = normalized_json_artifact(output_dir.join("graph.json").as_path())?;
+        let plan = normalized_json_artifact(output_dir.join("migration-plan.json").as_path())?;
+        let markdown_raw =
+            std::fs::read_to_string(output_dir.join("migration-plan.md").as_std_path()).ok()?;
+        let markdown = normalize_markdown(&markdown_raw);
+        Some((graph, plan, markdown))
+    }
+
+    fn normalized_json_artifact(path: &Utf8Path) -> Option<String> {
+        let mut value = read_json_file(path)?;
+        strip_generated_timestamps(&mut value);
+        Some(canonical_json_string(&value))
+    }
+
+    fn strip_generated_timestamps(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                map.remove("generated_unix_epoch_ms");
+                for nested in map.values_mut() {
+                    strip_generated_timestamps(nested);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    strip_generated_timestamps(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn canonical_json_string(value: &Value) -> String {
+        match value {
+            Value::Null => "null".to_owned(),
+            Value::Bool(flag) => {
+                if *flag {
+                    "true".to_owned()
+                } else {
+                    "false".to_owned()
+                }
+            }
+            Value::Number(number) => number.to_string(),
+            Value::String(text) => {
+                serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_owned())
+            }
+            Value::Array(items) => {
+                let inner = items
+                    .iter()
+                    .map(canonical_json_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("[{inner}]")
+            }
+            Value::Object(map) => {
+                let mut keys: Vec<_> = map.keys().cloned().collect();
+                keys.sort();
+                let inner = keys
+                    .iter()
+                    .map(|key| {
+                        let key_json =
+                            serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_owned());
+                        let value_json = map
+                            .get(key)
+                            .map_or_else(|| "null".to_owned(), canonical_json_string);
+                        format!("{key_json}:{value_json}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{{{inner}}}")
+            }
+        }
+    }
+
+    fn normalize_markdown(markdown: &str) -> String {
+        markdown
+            .lines()
+            .filter(|line| !line.starts_with("- Generated unix epoch ms:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn contract_summary(graph_json: &Value, plan_json: &Value, markdown: &str) -> Value {
+        json!({
+            "graph_json": {
+                "top_level_keys": object_keys(graph_json),
+                "metadata_keys": object_keys_for(graph_json, "metadata"),
+                "counts_keys": object_keys_for_nested(graph_json, "metadata", "counts"),
+                "parser_metadata_keys": object_keys_for_nested(graph_json, "metadata", "parser_metadata"),
+                "graph_keys": object_keys_for(graph_json, "graph"),
+                "diff_keys": object_keys_for(graph_json, "diff"),
+                "edge_keys": first_array_object_keys(graph_json, "graph", "edges"),
+            },
+            "migration_plan_json": {
+                "top_level_keys": object_keys(plan_json),
+                "metadata_keys": object_keys_for(plan_json, "metadata"),
+                "counts_keys": object_keys_for(plan_json, "counts"),
+                "step_keys": first_step_keys(plan_json),
+            },
+            "migration_plan_md": {
+                "contains_title": markdown.contains("# Migration Plan"),
+                "contains_snapshot_mode": markdown.contains("- Snapshot mode: `minimal`"),
+                "contains_parser_version": markdown.contains("- Parser version: `"),
+                "contains_relation_query_version": markdown.contains("- Relation query version: `"),
+                "contains_table_header": markdown.contains("| Step | Order | Prerequisites | Risk (bps) |"),
+                "contains_table_divider": markdown.contains("| --- | --- | --- | --- |"),
+            }
+        })
+    }
+
+    fn object_keys(value: &Value) -> Vec<String> {
+        if let Value::Object(map) = value {
+            let mut keys: Vec<_> = map.keys().cloned().collect();
+            keys.sort();
+            return keys;
+        }
+        Vec::new()
+    }
+
+    fn object_keys_for(value: &Value, key: &str) -> Vec<String> {
+        value.get(key).map_or_else(Vec::new, object_keys)
+    }
+
+    fn object_keys_for_nested(value: &Value, first: &str, second: &str) -> Vec<String> {
+        value
+            .get(first)
+            .and_then(|nested| nested.get(second))
+            .map_or_else(Vec::new, object_keys)
+    }
+
+    fn first_array_object_keys(value: &Value, parent: &str, child: &str) -> Vec<String> {
+        let Some(array) = value.get(parent).and_then(|nested| nested.get(child)) else {
+            return Vec::new();
+        };
+        let Some(items) = array.as_array() else {
+            return Vec::new();
+        };
+        let Some(first) = items.first() else {
+            return Vec::new();
+        };
+        object_keys(first)
+    }
+
+    fn first_step_keys(value: &Value) -> Vec<String> {
+        let Some(steps) = value.get("steps").and_then(Value::as_array) else {
+            return Vec::new();
+        };
+        let Some(first) = steps.first() else {
+            return Vec::new();
+        };
+        object_keys(first)
+    }
+
+    fn create_temp_project(suffix: &str) -> Utf8PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let root_std = std::env::temp_dir().join(format!("ch-migrate-cli-{suffix}-{nanos}"));
+        let root = Utf8PathBuf::from_path_buf(root_std)
+            .unwrap_or_else(|_| Utf8PathBuf::from(format!("/tmp/ch-migrate-cli-{suffix}-{nanos}")));
+
+        write_fixture_file(
+            &root.join("app/shared/interfaces.ts"),
+            "export interface OrderModel { id: string; }\n",
+        );
+        write_fixture_file(
+            &root.join("app/shared/models/order.ts"),
+            "export class OrderModel {}\nexport class OrderCodeGen {}\n",
+        );
+        write_fixture_file(
+            &root.join("app/shared_2023/interfaces.ts"),
+            "export interface OrderModel { id: string; }\n",
+        );
+        write_fixture_file(
+            &root.join("app/shared_2023/models/order.ts"),
+            "export class OrderModel {}\nexport class OrderCodeGen {}\n",
+        );
+        write_fixture_file(
+            &root.join("app/features/order-consumer.ts"),
+            r#"import { OrderModel } from "../shared/models/order";
+import { OrderModel as OrderModel2023 } from "../shared_2023/models/order";
+
+export class OrderConsumer {
+  legacy: OrderModel;
+  modern: OrderModel2023;
+}
+"#,
+        );
+
+        root
+    }
+
+    fn write_fixture_file(path: &Utf8PathBuf, contents: &str) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent.as_std_path());
+        }
+        let _ = std::fs::write(path.as_std_path(), contents);
     }
 }

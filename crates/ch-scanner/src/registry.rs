@@ -36,8 +36,8 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{ModelDefinition, ModelRegistry, ModelSource};
-use ch_ts_parser::{ExportInfo, extract_exports, get_typescript_export_query, kebab_to_pascal};
+use ch_core::{FxHashSet, ModelDefinition, ModelRegistry, ModelSource};
+use ch_ts_parser::{extract_exports, get_typescript_export_query, kebab_to_pascal, ExportInfo};
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use tracing::{debug, info, warn};
@@ -82,7 +82,10 @@ impl RegistryBuilder {
     /// * `shared_2023_path` - Path to the modern `shared_2023/` directory
     #[must_use]
     pub fn new(shared_path: &Utf8Path, shared_2023_path: &Utf8Path) -> Self {
-        Self { shared_path: shared_path.to_owned(), shared_2023_path: shared_2023_path.to_owned() }
+        Self {
+            shared_path: shared_path.to_owned(),
+            shared_2023_path: shared_2023_path.to_owned(),
+        }
     }
 
     /// Creates a new registry builder, inferring paths from a root directory.
@@ -95,7 +98,10 @@ impl RegistryBuilder {
     /// * `root` - Root directory containing shared subdirectories
     #[must_use]
     pub fn from_root(root: &Utf8Path) -> Self {
-        Self { shared_path: root.join("shared"), shared_2023_path: root.join("shared_2023") }
+        Self {
+            shared_path: root.join("shared"),
+            shared_2023_path: root.join("shared_2023"),
+        }
     }
 
     /// Builds the model registry by scanning all model definition files.
@@ -169,10 +175,11 @@ impl RegistryBuilder {
         Ok(registry)
     }
 
-    /// Parses an interfaces file and registers all exports.
+    /// Parses an interfaces file and registers each export as its own model definition.
     ///
-    /// Interface files typically contain many interface declarations and
-    /// are treated as a single "interfaces" model in the registry.
+    /// This preserves per-model identity for `interfaces.ts` and
+    /// `interfaces.codegen.ts` exports, instead of collapsing everything into one
+    /// synthetic bucket.
     fn parse_interfaces_file(path: &Utf8Path, source: ModelSource, registry: &mut ModelRegistry) {
         if !path.exists() {
             debug!(path = %path, "Interfaces file not found, skipping");
@@ -200,21 +207,26 @@ impl RegistryBuilder {
             return;
         }
 
-        // Create a model definition for the interfaces file
-        let model_name = path.file_stem().unwrap_or("interfaces").to_owned();
+        let mut seen = FxHashSet::default();
+        let mut registered = 0usize;
 
-        let mut definition = ModelDefinition::new(model_name, source, path);
-        for export in &exports {
-            definition.add_export(&export.name);
+        for export in exports {
+            if !seen.insert(export.name.clone()) {
+                continue;
+            }
+
+            let export_name = export.name;
+            let mut definition = ModelDefinition::new(export_name.clone(), source, path);
+            definition.add_export(export_name);
+            registry.register(definition);
+            registered += 1;
         }
 
         debug!(
             path = %path,
-            export_count = exports.len(),
-            "Registered interfaces file"
+            registered_exports = registered,
+            "Registered interface exports as model definitions"
         );
-
-        registry.register(definition);
     }
 
     /// Scans a model directory and registers all model files.
@@ -231,7 +243,11 @@ impl RegistryBuilder {
         let entries: Vec<_> = match fs::read_dir(dir.as_std_path()) {
             Ok(entries) => entries
                 .filter_map(Result::ok)
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts" || ext == "tsx"))
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext == "ts" || ext == "tsx")
+                })
                 .collect(),
             Err(e) => {
                 warn!(dir = %dir, error = %e, "Failed to read models directory");
@@ -258,7 +274,10 @@ impl RegistryBuilder {
                 }
 
                 // Derive model name from filename
-                let model_name = utf8_path.file_stem().map(kebab_to_pascal).unwrap_or_default();
+                let model_name = utf8_path
+                    .file_stem()
+                    .map(kebab_to_pascal)
+                    .unwrap_or_default();
 
                 if model_name.is_empty() {
                     return None;
@@ -293,7 +312,9 @@ impl RegistryBuilder {
             ch_ts_parser::TsParser::new().map_err(|e| ScanError::config(e.to_string()))?;
 
         // Parse to get the tree - we only need the tree for export extraction
-        let parse_result = parser.parse(source).map_err(|e| ScanError::config(e.to_string()))?;
+        let parse_result = parser
+            .parse(source)
+            .map_err(|e| ScanError::config(e.to_string()))?;
 
         Ok(extract_exports(&parse_result.tree, source, query))
     }
@@ -329,12 +350,26 @@ impl RegistryBuildResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_test_dir(name: &str) -> Utf8PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!("ch-migration-{name}-{nanos}"));
+        let _ = fs::create_dir_all(&path);
+        Utf8PathBuf::try_from(path).unwrap_or_else(|_| Utf8PathBuf::from("."))
+    }
 
     #[test]
     fn test_registry_builder_from_root() {
         let builder = RegistryBuilder::from_root(Utf8Path::new("/app/src"));
         assert_eq!(builder.shared_path, Utf8PathBuf::from("/app/src/shared"));
-        assert_eq!(builder.shared_2023_path, Utf8PathBuf::from("/app/src/shared_2023"));
+        assert_eq!(
+            builder.shared_2023_path,
+            Utf8PathBuf::from("/app/src/shared_2023")
+        );
     }
 
     #[test]
@@ -344,7 +379,10 @@ mod tests {
             Utf8Path::new("/custom/shared_2023"),
         );
         assert_eq!(builder.shared_path, Utf8PathBuf::from("/custom/shared"));
-        assert_eq!(builder.shared_2023_path, Utf8PathBuf::from("/custom/shared_2023"));
+        assert_eq!(
+            builder.shared_2023_path,
+            Utf8PathBuf::from("/custom/shared_2023")
+        );
     }
 
     #[test]
@@ -383,5 +421,47 @@ export { Bar };
 
         assert!(!clean_result.has_errors());
         assert_eq!(clean_result.error_count(), 0);
+    }
+
+    #[test]
+    fn test_parse_interfaces_file_registers_per_export_model_definitions() {
+        let temp_dir = create_temp_test_dir("registry-per-export");
+        let interfaces_path = temp_dir.join("interfaces.ts");
+
+        let write_result = fs::write(
+            interfaces_path.as_std_path(),
+            r#"
+export interface FooModel { id: string; }
+export interface BarModel { id: string; }
+"#,
+        );
+        assert!(write_result.is_ok(), "failed to create interfaces fixture");
+
+        let mut registry = ModelRegistry::new();
+        RegistryBuilder::parse_interfaces_file(
+            &interfaces_path,
+            ModelSource::SharedLegacy,
+            &mut registry,
+        );
+
+        assert_eq!(registry.legacy_model_count(), 2);
+        assert!(registry.is_legacy_export("FooModel"));
+        assert!(registry.is_legacy_export("BarModel"));
+
+        let foo = registry.get_legacy_model("FooModel");
+        assert!(foo.is_some(), "expected FooModel definition");
+        if let Some(definition) = foo {
+            assert_eq!(definition.exports.as_slice(), ["FooModel"]);
+            assert_eq!(definition.name, "FooModel");
+        }
+
+        let bar = registry.get_legacy_model("BarModel");
+        assert!(bar.is_some(), "expected BarModel definition");
+        if let Some(definition) = bar {
+            assert_eq!(definition.exports.as_slice(), ["BarModel"]);
+            assert_eq!(definition.name, "BarModel");
+        }
+
+        let _ = fs::remove_dir_all(temp_dir.as_std_path());
     }
 }

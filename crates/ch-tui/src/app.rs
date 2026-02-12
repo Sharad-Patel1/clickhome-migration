@@ -13,8 +13,12 @@
 //!  ├── scan_state: ScanState     # Background scan progress
 //!  ├── mode: AppMode             # Current UI mode
 //!  ├── focus: Focus              # Active panel
+//!  ├── view_mode: ViewMode        # Files vs graph view
 //!  ├── file_list_state: FileListState
 //!  ├── detail_state: DetailPaneState
+//!  ├── graph_list_state: FileListState
+//!  ├── graph_drilldown_state: GraphDrilldownState
+//!  ├── graph: GraphState
 //!  ├── filter: FilterState       # Current filter configuration
 //!  └── status: Option<StatusMessage>
 //! ```
@@ -32,6 +36,9 @@ use tracing::{debug, warn};
 
 use crate::action::Action;
 use crate::error::TuiError;
+use crate::graph_artifacts::{
+    GraphArtifacts, GraphNodeSummary, GraphSummary, DEFAULT_GRAPH_ARTIFACT_DIR,
+};
 
 /// The current mode of the application UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,6 +55,27 @@ pub enum AppMode {
 
     /// Directory setup overlay is displayed.
     DirectorySetup,
+}
+
+/// Which primary view is active in the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    /// File list + detail view.
+    #[default]
+    Files,
+    /// Graph summary + model drilldown view.
+    Graph,
+}
+
+impl ViewMode {
+    /// Toggles between file and graph views.
+    #[must_use]
+    pub const fn toggle(self) -> Self {
+        match self {
+            Self::Files => Self::Graph,
+            Self::Graph => Self::Files,
+        }
+    }
 }
 
 /// Current state of the background scan.
@@ -85,7 +113,10 @@ impl ScanState {
     #[must_use]
     pub fn progress_percent(&self) -> Option<f64> {
         match self {
-            Self::Scanning { discovered, scanned } if *discovered > 0 =>
+            Self::Scanning {
+                discovered,
+                scanned,
+            } if *discovered > 0 =>
             {
                 #[allow(clippy::cast_precision_loss)]
                 Some((*scanned as f64 / *discovered as f64) * 100.0)
@@ -104,15 +135,27 @@ pub enum Focus {
 
     /// Detail pane is focused.
     DetailPane,
+
+    /// Graph model list panel is focused.
+    GraphList,
+
+    /// Graph drilldown panel is focused.
+    GraphDetail,
 }
 
 impl Focus {
-    /// Toggles between `FileList` and `DetailPane`.
+    /// Toggles focus based on the active view.
     #[must_use]
-    pub const fn toggle(self) -> Self {
-        match self {
-            Self::FileList => Self::DetailPane,
-            Self::DetailPane => Self::FileList,
+    pub const fn toggle_for_view(self, view: ViewMode) -> Self {
+        match view {
+            ViewMode::Files => match self {
+                Self::FileList => Self::DetailPane,
+                _ => Self::FileList,
+            },
+            ViewMode::Graph => match self {
+                Self::GraphList => Self::GraphDetail,
+                _ => Self::GraphList,
+            },
         }
     }
 }
@@ -286,7 +329,11 @@ impl FileListState {
     pub fn set_filter(&mut self, indices: Option<Vec<usize>>) {
         self.filtered_indices = indices;
         // Reset selection when filter changes
-        self.selected = if self.filtered_indices.as_ref().is_some_and(|v| !v.is_empty()) {
+        self.selected = if self
+            .filtered_indices
+            .as_ref()
+            .is_some_and(|v| !v.is_empty())
+        {
             Some(0)
         } else {
             None
@@ -350,6 +397,37 @@ impl FileListState {
 pub struct DetailPaneState {
     /// Scroll offset within the detail view.
     pub scroll_offset: usize,
+}
+
+/// State for the graph drilldown widget.
+#[derive(Debug, Clone, Default)]
+pub struct GraphDrilldownState {
+    /// Scroll offset within the drilldown view.
+    pub scroll_offset: usize,
+}
+
+/// State for graph artifacts and model browsing.
+#[derive(Debug, Clone)]
+pub struct GraphState {
+    /// Loaded graph artifacts (if available).
+    pub artifacts: Option<GraphArtifacts>,
+    /// Cached graph nodes for list rendering.
+    pub nodes: Vec<GraphNodeSummary>,
+    /// Last load error (if any).
+    pub load_error: Option<String>,
+    /// Artifact directory path.
+    pub artifact_dir: Utf8PathBuf,
+}
+
+impl GraphState {
+    fn new() -> Self {
+        Self {
+            artifacts: None,
+            nodes: Vec::new(),
+            load_error: None,
+            artifact_dir: Utf8PathBuf::from(DEFAULT_GRAPH_ARTIFACT_DIR),
+        }
+    }
 }
 
 /// Filter configuration state.
@@ -490,13 +568,21 @@ impl StatusMessage {
     /// Creates a new info message.
     #[must_use]
     pub fn info(text: impl Into<String>) -> Self {
-        Self { text: text.into(), timestamp: Instant::now(), is_error: false }
+        Self {
+            text: text.into(),
+            timestamp: Instant::now(),
+            is_error: false,
+        }
     }
 
     /// Creates a new error message.
     #[must_use]
     pub fn error(text: impl Into<String>) -> Self {
-        Self { text: text.into(), timestamp: Instant::now(), is_error: true }
+        Self {
+            text: text.into(),
+            timestamp: Instant::now(),
+            is_error: true,
+        }
     }
 
     /// Returns `true` if the message should be auto-hidden.
@@ -525,11 +611,23 @@ pub struct App {
     /// Which panel has focus.
     pub focus: Focus,
 
+    /// Which primary view is active.
+    pub view_mode: ViewMode,
+
     /// File list widget state.
     pub file_list_state: FileListState,
 
     /// Detail pane widget state.
     pub detail_state: DetailPaneState,
+
+    /// Graph model list widget state.
+    pub graph_list_state: FileListState,
+
+    /// Graph drilldown widget state.
+    pub graph_drilldown_state: GraphDrilldownState,
+
+    /// Graph view state and artifacts.
+    pub graph: GraphState,
 
     /// Current filter configuration.
     pub filter: FilterState,
@@ -571,20 +669,30 @@ impl App {
     pub fn new(config: Config, scanner: Scanner) -> Self {
         let needs_setup = Self::requires_directory_setup(&config);
         let directory_setup = DirectorySetup::from_config(&config);
-        let mode = if needs_setup { AppMode::DirectorySetup } else { AppMode::Normal };
+        let mode = if needs_setup {
+            AppMode::DirectorySetup
+        } else {
+            AppMode::Normal
+        };
         let status = if needs_setup {
-            Some(StatusMessage::info("Select directories and press Enter to apply"))
+            Some(StatusMessage::info(
+                "Select directories and press Enter to apply",
+            ))
         } else {
             None
         };
-        Self {
+        let mut app = Self {
             config,
             scanner,
             files: Vec::new(),
             mode,
             focus: Focus::FileList,
+            view_mode: ViewMode::Files,
             file_list_state: FileListState::new(),
             detail_state: DetailPaneState::default(),
+            graph_list_state: FileListState::new(),
+            graph_drilldown_state: GraphDrilldownState::default(),
+            graph: GraphState::new(),
             filter: FilterState::default(),
             sort_mode: SortMode::default(),
             status,
@@ -595,7 +703,10 @@ impl App {
             terminal_size: Rect::default(),
             scan_state: ScanState::Idle,
             files_dirty: false,
-        }
+        };
+
+        app.load_graph_artifacts();
+        app
     }
 
     /// Performs the initial scan.
@@ -655,6 +766,7 @@ impl App {
             KeyCode::Char('o') => Action::OpenInEditor,
             KeyCode::Char('r') => Action::Rescan,
             KeyCode::Char('d') => Action::EnterDirectorySetup,
+            KeyCode::Char('v') => Action::ToggleView,
             KeyCode::Esc => {
                 if self.filter.is_active() {
                     Action::ClearFilter
@@ -734,36 +846,50 @@ impl App {
         match action {
             Action::Quit => self.should_quit = true,
 
-            Action::NextItem => {
-                self.file_list_state.select_next(self.files.len());
-            }
-            Action::PreviousItem => {
-                self.file_list_state.select_previous(self.files.len());
-            }
-            Action::FirstItem => {
-                self.file_list_state.select_first(self.files.len());
-            }
-            Action::LastItem => {
-                self.file_list_state.select_last(self.files.len());
-            }
-            Action::PageDown => {
-                self.file_list_state.page_down(self.files.len());
-            }
-            Action::PageUp => {
-                self.file_list_state.page_up(self.files.len());
-            }
-            Action::SelectItem(idx) => {
-                self.file_list_state.select(idx, self.files.len());
-            }
+            Action::NextItem => match self.view_mode {
+                ViewMode::Files => self.file_list_state.select_next(self.files.len()),
+                ViewMode::Graph => self.graph_list_state.select_next(self.graph_node_count()),
+            },
+            Action::PreviousItem => match self.view_mode {
+                ViewMode::Files => self.file_list_state.select_previous(self.files.len()),
+                ViewMode::Graph => self
+                    .graph_list_state
+                    .select_previous(self.graph_node_count()),
+            },
+            Action::FirstItem => match self.view_mode {
+                ViewMode::Files => self.file_list_state.select_first(self.files.len()),
+                ViewMode::Graph => self.graph_list_state.select_first(self.graph_node_count()),
+            },
+            Action::LastItem => match self.view_mode {
+                ViewMode::Files => self.file_list_state.select_last(self.files.len()),
+                ViewMode::Graph => self.graph_list_state.select_last(self.graph_node_count()),
+            },
+            Action::PageDown => match self.view_mode {
+                ViewMode::Files => self.file_list_state.page_down(self.files.len()),
+                ViewMode::Graph => self.graph_list_state.page_down(self.graph_node_count()),
+            },
+            Action::PageUp => match self.view_mode {
+                ViewMode::Files => self.file_list_state.page_up(self.files.len()),
+                ViewMode::Graph => self.graph_list_state.page_up(self.graph_node_count()),
+            },
+            Action::SelectItem(idx) => match self.view_mode {
+                ViewMode::Files => self.file_list_state.select(idx, self.files.len()),
+                ViewMode::Graph => self.graph_list_state.select(idx, self.graph_node_count()),
+            },
 
             Action::ToggleFocus => {
-                self.focus = self.focus.toggle();
+                self.focus = self.focus.toggle_for_view(self.view_mode);
             }
             Action::FocusFileList => {
+                self.view_mode = ViewMode::Files;
                 self.focus = Focus::FileList;
             }
             Action::FocusDetailPane => {
+                self.view_mode = ViewMode::Files;
                 self.focus = Focus::DetailPane;
+            }
+            Action::ToggleView => {
+                self.toggle_view();
             }
 
             Action::EnterFilterMode => {
@@ -792,7 +918,10 @@ impl App {
             Action::CycleSortMode => {
                 self.sort_mode = self.sort_mode.cycle();
                 self.sort_and_refresh_files();
-                self.status = Some(StatusMessage::info(format!("Sort: {}", self.sort_mode.label())));
+                self.status = Some(StatusMessage::info(format!(
+                    "Sort: {}",
+                    self.sort_mode.label()
+                )));
             }
 
             Action::Rescan => {
@@ -800,14 +929,18 @@ impl App {
                     warn!(error = %e, "Rescan failed");
                     self.status = Some(StatusMessage::error(format!("Rescan failed: {e}")));
                 }
+                self.load_graph_artifacts();
             }
             Action::RescanFile(path) => {
                 self.rescan_file(&path);
             }
 
             Action::ToggleHelp => {
-                self.mode =
-                    if self.mode == AppMode::Help { AppMode::Normal } else { AppMode::Help };
+                self.mode = if self.mode == AppMode::Help {
+                    AppMode::Normal
+                } else {
+                    AppMode::Help
+                };
             }
             Action::ShowHelp => {
                 self.mode = AppMode::Help;
@@ -828,14 +961,14 @@ impl App {
                     self.mode = AppMode::Normal;
                 }
             }
-            Action::ApplyDirectorySetup => match self.apply_directory_setup() {
-                Ok(()) => {
+            Action::ApplyDirectorySetup => {
+                if let Err(e) = self.apply_directory_setup() {
+                    self.status = Some(StatusMessage::error(format!("{e}")));
+                } else {
                     self.mode = AppMode::Normal;
                 }
-                Err(e) => {
-                    self.status = Some(StatusMessage::error(format!("{e}")));
-                }
-            },
+                self.load_graph_artifacts();
+            }
 
             Action::ShowStatus(text) => {
                 self.status = Some(StatusMessage::info(text));
@@ -875,7 +1008,10 @@ impl App {
         match update {
             ScanUpdate::PathsDiscovered(count) => {
                 debug!(count, "Paths discovered");
-                self.scan_state = ScanState::Scanning { discovered: count, scanned: 0 };
+                self.scan_state = ScanState::Scanning {
+                    discovered: count,
+                    scanned: 0,
+                };
                 // Pre-allocate storage for efficiency
                 self.files.reserve(count);
                 self.status = Some(StatusMessage::info(format!("Scanning {count} files...")));
@@ -892,7 +1028,11 @@ impl App {
                 self.files_dirty = true;
 
                 // Update progress counter
-                if let ScanState::Scanning { discovered, ref mut scanned } = self.scan_state {
+                if let ScanState::Scanning {
+                    discovered,
+                    ref mut scanned,
+                } = self.scan_state
+                {
                     *scanned += 1;
                     // Update status message periodically (every 100 files)
                     if *scanned % 100 == 0 {
@@ -917,8 +1057,10 @@ impl App {
                 self.stats = result.stats;
                 // Force sort and apply filters
                 self.sort_and_refresh_files();
-                self.status =
-                    Some(StatusMessage::info(format!("Scanned {} files", self.stats.total)));
+                self.status = Some(StatusMessage::info(format!(
+                    "Scanned {} files",
+                    self.stats.total
+                )));
             }
         }
     }
@@ -941,7 +1083,9 @@ impl App {
     /// when no names are present.
     #[must_use]
     pub fn legacy_remaining_count(file: &FileInfo) -> usize {
-        file.legacy_imports().map(|import| import.names.len().max(1)).sum()
+        file.legacy_imports()
+            .map(|import| import.names.len().max(1))
+            .sum()
     }
 
     /// Sorts files in place according to the current sort mode.
@@ -1032,8 +1176,11 @@ impl App {
         }
 
         self.rebuild_scanner()?;
-        self.pending_watcher_restart =
-            if self.config.watch.enabled { Some(self.config.scan.root_path.clone()) } else { None };
+        self.pending_watcher_restart = if self.config.watch.enabled {
+            Some(self.config.scan.root_path.clone())
+        } else {
+            None
+        };
 
         if let Err(e) = self.rescan() {
             self.status = Some(StatusMessage::error(format!("Rescan failed: {e}")));
@@ -1048,7 +1195,11 @@ impl App {
         let shared = parse_dir_input("shared", &self.directory_setup.shared_input)?;
         let shared_2023 = parse_dir_input("shared_2023", &self.directory_setup.shared_2023_input)?;
 
-        Ok(DirectoryPaths { root, shared, shared_2023 })
+        Ok(DirectoryPaths {
+            root,
+            shared,
+            shared_2023,
+        })
     }
 
     fn rebuild_scanner(&mut self) -> Result<(), TuiError> {
@@ -1139,6 +1290,15 @@ impl App {
             .and_then(|idx| self.files.get(idx))
     }
 
+    /// Returns the currently selected graph node, if any.
+    #[must_use]
+    pub fn selected_graph_node(&self) -> Option<&GraphNodeSummary> {
+        self.graph_list_state
+            .selected
+            .map(|idx| self.graph_list_state.actual_index(idx))
+            .and_then(|idx| self.graph.nodes.get(idx))
+    }
+
     /// Returns the currently selected file path.
     fn selected_file_path(&self) -> Option<Utf8PathBuf> {
         self.selected_file().map(|file| file.path.clone())
@@ -1182,7 +1342,51 @@ impl App {
             .map(|idx| self.file_list_state.actual_index(idx))
             .and_then(|idx| self.files.get(idx));
 
-        (selected_file, self.focus == Focus::DetailPane, &mut self.detail_state)
+        (
+            selected_file,
+            self.focus == Focus::DetailPane,
+            &mut self.detail_state,
+        )
+    }
+
+    /// Returns the data required to render the graph summary panel.
+    pub(crate) fn graph_summary_data(&self) -> (Option<&GraphSummary>, Option<&str>) {
+        let summary = self
+            .graph
+            .artifacts
+            .as_ref()
+            .map(|artifacts| &artifacts.summary);
+        (summary, self.graph.load_error.as_deref())
+    }
+
+    /// Returns the data required to render the graph model list.
+    pub(crate) fn graph_list_render_data(
+        &mut self,
+    ) -> (&[GraphNodeSummary], bool, &mut FileListState) {
+        let focused = self.focus == Focus::GraphList;
+        let nodes = &self.graph.nodes;
+        let state = &mut self.graph_list_state;
+        (nodes.as_slice(), focused, state)
+    }
+
+    /// Returns the data required to render the model drilldown panel.
+    pub(crate) fn graph_drilldown_render_data(
+        &mut self,
+    ) -> (
+        Option<&GraphArtifacts>,
+        Option<&GraphNodeSummary>,
+        bool,
+        &mut GraphDrilldownState,
+    ) {
+        let focused = self.focus == Focus::GraphDetail;
+        let selected = self
+            .graph_list_state
+            .selected
+            .map(|idx| self.graph_list_state.actual_index(idx))
+            .and_then(|idx| self.graph.nodes.get(idx));
+        let artifacts = self.graph.artifacts.as_ref();
+        let state = &mut self.graph_drilldown_state;
+        (artifacts, selected, focused, state)
     }
 
     /// Returns all files (for rendering).
@@ -1191,10 +1395,22 @@ impl App {
         &self.files
     }
 
+    /// Returns the available graph nodes (for rendering).
+    #[must_use]
+    pub fn graph_nodes(&self) -> &[GraphNodeSummary] {
+        self.graph.nodes.as_slice()
+    }
+
     /// Returns the total number of files.
     #[must_use]
     pub fn file_count(&self) -> usize {
         self.files.len()
+    }
+
+    /// Returns the total number of graph nodes.
+    #[must_use]
+    pub fn graph_node_count(&self) -> usize {
+        self.graph_nodes().len()
     }
 
     /// Returns the current sort mode.
@@ -1217,6 +1433,70 @@ impl App {
     /// Reconciles list selection and scroll offsets after terminal/UI lifecycle changes.
     pub fn reconcile_view_state(&mut self) {
         self.file_list_state.reconcile(self.files.len());
+        let graph_count = self.graph_node_count();
+        self.graph_list_state.reconcile(graph_count);
+    }
+
+    fn toggle_view(&mut self) {
+        self.view_mode = self.view_mode.toggle();
+        match self.view_mode {
+            ViewMode::Files => {
+                self.focus = Focus::FileList;
+            }
+            ViewMode::Graph => {
+                self.focus = Focus::GraphList;
+                self.load_graph_artifacts();
+                self.ensure_graph_selection();
+                if self.graph.artifacts.is_none() {
+                    if let Some(error) = self.graph.load_error.as_deref() {
+                        self.status = Some(StatusMessage::info(format!(
+                            "Graph artifacts unavailable: {error}"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    fn ensure_graph_selection(&mut self) {
+        let total = self.graph_node_count();
+        if total == 0 {
+            self.graph_list_state.selected = None;
+            return;
+        }
+        if self.graph_list_state.selected.is_none() {
+            self.graph_list_state.selected = Some(0);
+        }
+        self.graph_list_state.reconcile(total);
+    }
+
+    fn load_graph_artifacts(&mut self) {
+        match GraphArtifacts::load(self.graph.artifact_dir.as_path()) {
+            Ok(artifacts) => {
+                let node_count = artifacts.nodes.len();
+                self.graph.artifacts = Some(artifacts);
+                self.graph.load_error = None;
+                self.graph.nodes = self
+                    .graph
+                    .artifacts
+                    .as_ref()
+                    .map(|artifacts| artifacts.nodes.clone())
+                    .unwrap_or_default();
+                self.graph_list_state.reconcile(node_count);
+                if node_count == 0 {
+                    self.graph_list_state.selected = None;
+                } else if self.graph_list_state.selected.is_none() {
+                    self.graph_list_state.selected = Some(0);
+                }
+            }
+            Err(error) => {
+                self.graph.artifacts = None;
+                self.graph.load_error = Some(error.to_string());
+                self.graph.nodes.clear();
+                self.graph_list_state.selected = None;
+                self.graph_list_state.reconcile(0);
+            }
+        }
     }
 
     /// Handles a file change event from the watcher.
@@ -1268,7 +1548,9 @@ fn parse_dir_input(label: &str, input: &str) -> Result<Utf8PathBuf, TuiError> {
         return Err(TuiError::config(format!("{label} path not found: {path}")));
     }
     if !path.is_dir() {
-        return Err(TuiError::config(format!("{label} path is not a directory: {path}")));
+        return Err(TuiError::config(format!(
+            "{label} path is not a directory: {path}"
+        )));
     }
 
     Ok(path)
@@ -1281,16 +1563,12 @@ fn is_valid_dir(path: &Utf8PathBuf) -> bool {
 fn sort_files_for_mode(files: &mut [FileInfo], sort_mode: SortMode) {
     files.sort_unstable_by(|a, b| match sort_mode {
         SortMode::PathAsc => a.path.cmp(&b.path),
-        SortMode::LegacyRemainingDesc => {
-            App::legacy_remaining_count(b)
-                .cmp(&App::legacy_remaining_count(a))
-                .then_with(|| a.path.cmp(&b.path))
-        }
-        SortMode::LegacyRemainingAsc => {
-            App::legacy_remaining_count(a)
-                .cmp(&App::legacy_remaining_count(b))
-                .then_with(|| a.path.cmp(&b.path))
-        }
+        SortMode::LegacyRemainingDesc => App::legacy_remaining_count(b)
+            .cmp(&App::legacy_remaining_count(a))
+            .then_with(|| a.path.cmp(&b.path)),
+        SortMode::LegacyRemainingAsc => App::legacy_remaining_count(a)
+            .cmp(&App::legacy_remaining_count(b))
+            .then_with(|| a.path.cmp(&b.path)),
     });
 }
 
@@ -1309,9 +1587,15 @@ struct ParsedTextFilter<'a> {
 impl<'a> ParsedTextFilter<'a> {
     fn parse(raw: &'a str) -> Self {
         if let Some(rest) = raw.strip_prefix('=') {
-            Self { mode: TextFilterMode::Exact, needle: rest.trim() }
+            Self {
+                mode: TextFilterMode::Exact,
+                needle: rest.trim(),
+            }
         } else {
-            Self { mode: TextFilterMode::Contains, needle: raw }
+            Self {
+                mode: TextFilterMode::Contains,
+                needle: raw,
+            }
         }
     }
 
@@ -1327,7 +1611,9 @@ fn contains_case_insensitive_ascii(haystack: &str, needle: &str) -> bool {
 
     let haystack = haystack.as_bytes();
     let needle = needle.as_bytes();
-    haystack.windows(needle.len()).any(|window| window.eq_ignore_ascii_case(needle))
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn matches_text(haystack: &str, query: ParsedTextFilter<'_>) -> bool {
@@ -1346,7 +1632,10 @@ fn import_matches_model_query(import: &ImportInfo, query: ParsedTextFilter<'_>) 
 fn file_matches_text_or_model(file: &FileInfo, query: ParsedTextFilter<'_>) -> bool {
     query.is_empty()
         || matches_text(file.path.as_str(), query)
-        || file.imports.iter().any(|import| import_matches_model_query(import, query))
+        || file
+            .imports
+            .iter()
+            .any(|import| import_matches_model_query(import, query))
 }
 
 fn file_matches_filters_parsed(
@@ -1360,7 +1649,11 @@ fn file_matches_filters_parsed(
 }
 
 #[cfg(test)]
-fn file_matches_filters(file: &FileInfo, query: &str, status_filter: Option<MigrationStatus>) -> bool {
+fn file_matches_filters(
+    file: &FileInfo,
+    query: &str,
+    status_filter: Option<MigrationStatus>,
+) -> bool {
     file_matches_filters_parsed(file, ParsedTextFilter::parse(query.trim()), status_filter)
 }
 
@@ -1376,13 +1669,16 @@ impl App {
 mod tests {
     use super::*;
     use ch_core::{FileId, ImportKind, ModelSource, SourceLocation};
-    use smallvec::{SmallVec, smallvec};
+    use smallvec::{smallvec, SmallVec};
 
     fn make_import(path: &str, source: Option<ModelSource>, names: &[&str]) -> ImportInfo {
         ImportInfo::new(
             path,
             ImportKind::Named,
-            names.iter().map(|name| (*name).to_owned()).collect::<SmallVec<[String; 4]>>(),
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<SmallVec<[String; 4]>>(),
             source,
             SourceLocation::default(),
         )
@@ -1399,6 +1695,7 @@ mod tests {
             content_hash: 0,
             imports,
             model_refs: SmallVec::new(),
+            relation_evidence: SmallVec::new(),
             status,
             last_scanned: 0,
         }
@@ -1411,8 +1708,22 @@ mod tests {
 
     #[test]
     fn test_focus_toggle() {
-        assert_eq!(Focus::FileList.toggle(), Focus::DetailPane);
-        assert_eq!(Focus::DetailPane.toggle(), Focus::FileList);
+        assert_eq!(
+            Focus::FileList.toggle_for_view(ViewMode::Files),
+            Focus::DetailPane
+        );
+        assert_eq!(
+            Focus::DetailPane.toggle_for_view(ViewMode::Files),
+            Focus::FileList
+        );
+        assert_eq!(
+            Focus::GraphList.toggle_for_view(ViewMode::Graph),
+            Focus::GraphDetail
+        );
+        assert_eq!(
+            Focus::GraphDetail.toggle_for_view(ViewMode::Graph),
+            Focus::GraphList
+        );
     }
 
     #[test]
@@ -1431,13 +1742,21 @@ mod tests {
             "src/foo.ts",
             MigrationStatus::Legacy,
             smallvec![
-                make_import("../shared/models/order", Some(ModelSource::SharedLegacy), &["Order"]),
+                make_import(
+                    "../shared/models/order",
+                    Some(ModelSource::SharedLegacy),
+                    &["Order"]
+                ),
                 make_import(
                     "../shared/models/account",
                     Some(ModelSource::SharedLegacy),
                     &["Account", "AccountForm"]
                 ),
-                make_import("../shared/models/empty", Some(ModelSource::SharedLegacy), &[]),
+                make_import(
+                    "../shared/models/empty",
+                    Some(ModelSource::SharedLegacy),
+                    &[]
+                ),
                 make_import("@angular/core", None, &["Component"])
             ],
         );
@@ -1624,8 +1943,11 @@ mod tests {
 
     #[test]
     fn test_filter_path_match_only() {
-        let file =
-            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let file = make_file(
+            "src/features/orders.component.ts",
+            MigrationStatus::Legacy,
+            smallvec![],
+        );
 
         assert!(file_matches_filters(&file, "orders", None));
     }
@@ -1662,8 +1984,11 @@ mod tests {
 
     #[test]
     fn test_filter_exact_path_match_only() {
-        let file =
-            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let file = make_file(
+            "src/features/orders.component.ts",
+            MigrationStatus::Legacy,
+            smallvec![],
+        );
 
         assert!(file_matches_filters(
             &file,
@@ -1777,8 +2102,11 @@ mod tests {
 
     #[test]
     fn test_filter_case_insensitive_path_and_model() {
-        let path_file =
-            make_file("src/features/orders.component.ts", MigrationStatus::Legacy, smallvec![]);
+        let path_file = make_file(
+            "src/features/orders.component.ts",
+            MigrationStatus::Legacy,
+            smallvec![],
+        );
         let model_file = make_file(
             "src/foo.ts",
             MigrationStatus::Legacy,

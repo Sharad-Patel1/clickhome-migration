@@ -44,8 +44,13 @@ camino.workspace = true
 # Tracing
 tracing.workspace = true
 
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
 [dev-dependencies]
 insta.workspace = true
+smallvec.workspace = true
 
 [lints]
 workspace = true

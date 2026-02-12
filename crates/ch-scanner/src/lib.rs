@@ -110,10 +110,11 @@ pub use walker::FileWalker;
 use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileInfo, MigrationStatus, ModelRegistry};
+use ch_core::{FileInfo, FxHashSet, MigrationStatus, ModelRegistry};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use analyzer::AnalysisSource;
 use ch_ts_parser::ModelPathMatcher;
 
 /// Update sent during a streaming scan operation.
@@ -377,7 +378,10 @@ impl Scanner {
     ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {}", config.root)));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
         }
 
         if !config.root.is_dir() {
@@ -445,7 +449,10 @@ impl Scanner {
     ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {}", config.root)));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
         }
 
         if !config.root.is_dir() {
@@ -499,21 +506,28 @@ impl Scanner {
 
         // Reset statistics for fresh scan
         self.stats.reset();
-        self.cache.clear();
 
         // Walk directory to collect paths
         let walker = self.build_walker()?;
         let paths = walker.collect_paths()?;
 
         info!(count = paths.len(), "Collected TypeScript files");
+        self.prune_cache_to_paths(&paths);
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         // Analyze files in parallel
-        let analyzer = FileAnalyzer::new();
-        let results = analyzer.analyze_files(&paths, &self.model_path_matcher, registry_ref);
+        let results = FileAnalyzer::analyze_files_with_cache(
+            &paths,
+            &self.model_path_matcher,
+            registry_ref,
+            &self.cache,
+        );
 
         // Process results
         let mut errors = Vec::new();
@@ -522,7 +536,8 @@ impl Scanner {
             self.stats.increment_total();
 
             match result {
-                Ok(file_info) => {
+                Ok(outcome) => {
+                    let file_info = outcome.file_info;
                     // Update statistics based on status
                     match file_info.status {
                         MigrationStatus::Legacy => self.stats.increment_legacy(),
@@ -532,12 +547,22 @@ impl Scanner {
                         _ => {} // Handle any future status variants
                     }
 
-                    debug!(path = %file_info.path, status = ?file_info.status, "Analyzed file");
-                    self.cache.insert(file_info);
+                    if outcome.source == AnalysisSource::Parsed {
+                        self.cache
+                            .insert_with_key(file_info.clone(), outcome.cache_key);
+                    }
+
+                    debug!(
+                        path = %file_info.path,
+                        status = ?file_info.status,
+                        source = ?outcome.source,
+                        "Analyzed file"
+                    );
                 }
                 Err(e) => {
                     self.stats.increment_errors();
                     warn!(path = %path, error = %e, "Failed to analyze file");
+                    let _ = self.cache.remove(&path);
                     errors.push((path, e));
                 }
             }
@@ -607,7 +632,6 @@ impl Scanner {
 
         // Reset statistics for fresh scan
         self.stats.reset();
-        self.cache.clear();
 
         // Walk directory to collect paths
         let walker = self.build_walker()?;
@@ -615,16 +639,23 @@ impl Scanner {
         let path_count = paths.len();
 
         info!(count = path_count, "Collected TypeScript files");
+        self.prune_cache_to_paths(&paths);
 
         // Send paths discovered notification
-        if tx.blocking_send(ScanUpdate::PathsDiscovered(path_count)).is_err() {
+        if tx
+            .blocking_send(ScanUpdate::PathsDiscovered(path_count))
+            .is_err()
+        {
             // Receiver dropped, return early
             return Ok(());
         }
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         // Analyze files in parallel, streaming results
         let analyzer = FileAnalyzer::new();
@@ -682,17 +713,25 @@ impl Scanner {
         debug!(count = paths.len(), "Re-scanning files");
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
-        let analyzer = FileAnalyzer::new();
-        let results = analyzer.analyze_files(paths, &self.model_path_matcher, registry_ref);
+        let results = FileAnalyzer::analyze_files_with_cache(
+            paths,
+            &self.model_path_matcher,
+            registry_ref,
+            &self.cache,
+        );
 
         results
             .into_iter()
             .map(|(path, result)| {
                 let outcome = match result {
-                    Ok(file_info) => {
+                    Ok(outcome) => {
+                        let file_info = outcome.file_info;
                         // Update cache and statistics
                         // Note: We don't decrement old status since we'd need to track it
                         match file_info.status {
@@ -702,11 +741,15 @@ impl Scanner {
                             MigrationStatus::NoModels => self.stats.increment_no_models(),
                             _ => {} // Handle any future status variants
                         }
-                        self.cache.insert(file_info);
+
+                        if outcome.source == AnalysisSource::Parsed {
+                            self.cache.insert_with_key(file_info, outcome.cache_key);
+                        }
                         Ok(())
                     }
                     Err(e) => {
                         self.stats.increment_errors();
+                        let _ = self.cache.remove(&path);
                         Err(e)
                     }
                 };
@@ -842,10 +885,24 @@ impl Scanner {
 
         Ok(walker)
     }
+
+    fn prune_cache_to_paths(&self, paths: &[Utf8PathBuf]) {
+        let live_paths: FxHashSet<Utf8PathBuf> = paths.iter().cloned().collect();
+        for stale_path in self
+            .cache
+            .all_paths()
+            .into_iter()
+            .filter(|path| !live_paths.contains(path))
+        {
+            let _ = self.cache.remove(&stale_path);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
     use super::*;
 
     #[test]
@@ -876,12 +933,17 @@ mod tests {
 
     #[test]
     fn test_scan_config_with_shared_paths() {
-        let config = ScanConfig::new(Utf8Path::new("./src"))
-            .with_shared_paths(Utf8Path::new("./src/shared"), Utf8Path::new("./src/shared_2023"));
+        let config = ScanConfig::new(Utf8Path::new("./src")).with_shared_paths(
+            Utf8Path::new("./src/shared"),
+            Utf8Path::new("./src/shared_2023"),
+        );
 
         assert!(config.use_registry);
         assert_eq!(config.shared_path, Some(Utf8PathBuf::from("./src/shared")));
-        assert_eq!(config.shared_2023_path, Some(Utf8PathBuf::from("./src/shared_2023")));
+        assert_eq!(
+            config.shared_2023_path,
+            Some(Utf8PathBuf::from("./src/shared_2023"))
+        );
     }
 
     #[test]
@@ -898,5 +960,136 @@ mod tests {
         let config = ScanConfig::new(Utf8Path::new("/nonexistent/path/that/does/not/exist"));
         let result = Scanner::new(config);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_scan_reuses_cache_for_unchanged_file() {
+        let root = create_temp_root("cache-reuse");
+        let file_path = root.join("consumer.ts");
+        write_file(&file_path, "export const value = 1;\n");
+
+        let scanner = Scanner::new(ScanConfig::new(&root));
+        assert!(scanner.is_ok());
+        let Some(scanner) = scanner.ok() else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        let first = scanner.scan();
+        assert!(first.is_ok());
+
+        let first_file = scanner.get_file(file_path.as_path());
+        assert!(first_file.is_some());
+        let Some(first_file) = first_file else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let second = scanner.scan();
+        assert!(second.is_ok());
+        let second_file = scanner.get_file(file_path.as_path());
+        assert!(second_file.is_some());
+        let Some(second_file) = second_file else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        assert_eq!(first_file.last_scanned, second_file.last_scanned);
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_scan_reparses_when_file_contents_change() {
+        let root = create_temp_root("cache-reparse");
+        let file_path = root.join("consumer.ts");
+        write_file(&file_path, "export const value = 1;\n");
+
+        let scanner = Scanner::new(ScanConfig::new(&root));
+        assert!(scanner.is_ok());
+        let Some(scanner) = scanner.ok() else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        let first = scanner.scan();
+        assert!(first.is_ok());
+        let first_file = scanner.get_file(file_path.as_path());
+        assert!(first_file.is_some());
+        let Some(first_file) = first_file else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        std::thread::sleep(Duration::from_millis(1100));
+        write_file(&file_path, "export const value = 2;\n");
+
+        let second = scanner.scan();
+        assert!(second.is_ok());
+        let second_file = scanner.get_file(file_path.as_path());
+        assert!(second_file.is_some());
+        let Some(second_file) = second_file else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        assert!(second_file.last_scanned > first_file.last_scanned);
+        assert_ne!(second_file.content_hash, first_file.content_hash);
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_scan_prunes_deleted_files_from_cache() {
+        let root = create_temp_root("cache-prune");
+        let file_a = root.join("a.ts");
+        let file_b = root.join("b.ts");
+        write_file(&file_a, "export const a = 1;\n");
+        write_file(&file_b, "export const b = 2;\n");
+
+        let scanner = Scanner::new(ScanConfig::new(&root));
+        assert!(scanner.is_ok());
+        let Some(scanner) = scanner.ok() else {
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+            return;
+        };
+
+        let first = scanner.scan();
+        assert!(first.is_ok());
+        assert_eq!(scanner.cache().len(), 2);
+
+        let remove_result = std::fs::remove_file(file_b.as_std_path());
+        assert!(remove_result.is_ok());
+
+        let second = scanner.scan();
+        assert!(second.is_ok());
+        assert_eq!(scanner.cache().len(), 1);
+        assert!(scanner.get_file(file_b.as_path()).is_none());
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    fn create_temp_root(suffix: &str) -> Utf8PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let root_std = std::env::temp_dir().join(format!("ch-scanner-tests-{suffix}-{nanos}"));
+        let utf8 = Utf8PathBuf::from_path_buf(root_std);
+        assert!(utf8.is_ok());
+        let root = utf8.unwrap_or_default();
+        let create = std::fs::create_dir_all(root.as_std_path());
+        assert!(create.is_ok());
+        root
+    }
+
+    fn write_file(path: &Utf8PathBuf, contents: &str) {
+        if let Some(parent) = path.parent() {
+            let create = std::fs::create_dir_all(parent.as_std_path());
+            assert!(create.is_ok());
+        }
+        let write = std::fs::write(path.as_std_path(), contents);
+        assert!(write.is_ok());
     }
 }

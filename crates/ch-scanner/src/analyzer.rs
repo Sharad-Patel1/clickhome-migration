@@ -50,18 +50,52 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bumpalo_herd::Herd;
 use camino::{Utf8Path, Utf8PathBuf};
-use ch_core::{FileId, FileInfo, ImportInfo, MigrationStatus, ModelRegistry, ModelSource};
-use ch_ts_parser::{ArenaParser, ModelPathMatcher, detect_model_source_with};
+use ch_core::{
+    AstRelationEvidence, FileId, FileInfo, ImportInfo, MigrationStatus, ModelCategory,
+    ModelReference, ModelRegistry, ModelSource,
+};
+use ch_ts_parser::{
+    detect_model_source_with, parser_version_hash, query_version_hash, ArenaParser,
+    ModelPathMatcher,
+};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use rustc_hash::FxHasher;
+use rustc_hash::{FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
 
-use crate::ScanUpdate;
-use crate::cache::ScanCache;
+use crate::cache::{AnalysisCacheKey, ScanCache};
 use crate::error::ScanError;
 use crate::stats::ScanStats;
+use crate::ScanUpdate;
+
+/// Origin of a file analysis result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnalysisSource {
+    /// File was parsed during this pass.
+    Parsed,
+    /// File was reused from cache.
+    CacheHit,
+}
+
+/// Result payload for cache-aware file analysis.
+#[derive(Debug, Clone)]
+pub(crate) struct AnalysisOutcome {
+    /// File analysis payload.
+    pub file_info: FileInfo,
+    /// Cache key used for freshness checks.
+    pub cache_key: AnalysisCacheKey,
+    /// Source of the returned file info.
+    pub source: AnalysisSource,
+}
+
+struct AnalysisContext<'a> {
+    ts_parser: Option<&'a mut ArenaParser>,
+    tsx_parser: Option<&'a mut ArenaParser>,
+    arena: &'a bumpalo::Bump,
+    matcher: &'a ModelPathMatcher,
+    registry: Option<&'a ModelRegistry>,
+}
 
 /// Parallel file analyzer using rayon and per-thread arenas.
 ///
@@ -158,14 +192,52 @@ impl FileAnalyzer {
                 },
                 // Process each file
                 |(ts_parser, tsx_parser, member), path| {
-                    let result = self.analyze_file_inner(
-                        path,
-                        ts_parser.as_mut(),
-                        tsx_parser.as_mut(),
-                        member.as_bump(),
+                    let context = AnalysisContext {
+                        ts_parser: ts_parser.as_mut(),
+                        tsx_parser: tsx_parser.as_mut(),
+                        arena: member.as_bump(),
                         matcher,
                         registry,
-                    );
+                    };
+                    let result = Self::analyze_file_inner(path, context);
+                    (path.clone(), result)
+                },
+            )
+            .collect()
+    }
+
+    /// Analyzes files in parallel with version-aware cache reuse.
+    ///
+    /// Each file is read once to compute a content hash. If the cache key
+    /// (content hash + parser/query version fingerprints) is fresh, cached data
+    /// is reused. Otherwise, the file is parsed and returned as [`AnalysisSource::Parsed`].
+    #[must_use]
+    pub(crate) fn analyze_files_with_cache(
+        paths: &[Utf8PathBuf],
+        matcher: &ModelPathMatcher,
+        registry: Option<&ModelRegistry>,
+        cache: &ScanCache,
+    ) -> Vec<(Utf8PathBuf, Result<AnalysisOutcome, ScanError>)> {
+        let herd = Herd::new();
+
+        paths
+            .par_iter()
+            .map_init(
+                || {
+                    let ts_parser = ArenaParser::new().ok();
+                    let tsx_parser = ArenaParser::new_tsx().ok();
+                    let member = herd.get();
+                    (ts_parser, tsx_parser, member)
+                },
+                |(ts_parser, tsx_parser, member), path| {
+                    let context = AnalysisContext {
+                        ts_parser: ts_parser.as_mut(),
+                        tsx_parser: tsx_parser.as_mut(),
+                        arena: member.as_bump(),
+                        matcher,
+                        registry,
+                    };
+                    let result = Self::analyze_file_with_cache_inner(path, context, cache);
                     (path.clone(), result)
                 },
             )
@@ -223,17 +295,18 @@ impl FileAnalyzer {
             |(ts_parser, tsx_parser, member, sender), path| {
                 stats.increment_total();
 
-                let result = self.analyze_file_inner(
-                    path,
-                    ts_parser.as_mut(),
-                    tsx_parser.as_mut(),
-                    member.as_bump(),
+                let context = AnalysisContext {
+                    ts_parser: ts_parser.as_mut(),
+                    tsx_parser: tsx_parser.as_mut(),
+                    arena: member.as_bump(),
                     matcher,
                     registry,
-                );
+                };
+                let result = Self::analyze_file_with_cache_inner(path, context, cache);
 
                 match result {
-                    Ok(file_info) => {
+                    Ok(outcome) => {
+                        let file_info = outcome.file_info;
                         // Update statistics based on status
                         match file_info.status {
                             MigrationStatus::Legacy => stats.increment_legacy(),
@@ -243,8 +316,9 @@ impl FileAnalyzer {
                             _ => {} // Handle any future status variants
                         }
 
-                        // Insert into cache
-                        cache.insert(file_info.clone());
+                        if outcome.source == AnalysisSource::Parsed {
+                            cache.insert_with_key(file_info.clone(), outcome.cache_key);
+                        }
 
                         // Send update (ignore if receiver dropped)
                         // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
@@ -257,8 +331,10 @@ impl FileAnalyzer {
                         errors.lock().push((path.clone(), e.clone()));
 
                         // Send error update (ignore if receiver dropped)
-                        let _ = sender
-                            .blocking_send(ScanUpdate::FileError { path: path.clone(), error: e });
+                        let _ = sender.blocking_send(ScanUpdate::FileError {
+                            path: path.clone(),
+                            error: e,
+                        });
                     }
                 }
             },
@@ -296,44 +372,93 @@ impl FileAnalyzer {
         let arena = bumpalo::Bump::new();
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
 
-        let mut parser = if is_tsx { ArenaParser::new_tsx() } else { ArenaParser::new() }
-            .map_err(|e| ScanError::parse(path, e))?;
+        let mut parser = if is_tsx {
+            ArenaParser::new_tsx()
+        } else {
+            ArenaParser::new()
+        }
+        .map_err(|e| ScanError::parse(path, e))?;
 
-        self.analyze_file_inner(path, Some(&mut parser), None, &arena, matcher, registry)
+        let context = AnalysisContext {
+            ts_parser: Some(&mut parser),
+            tsx_parser: None,
+            arena: &arena,
+            matcher,
+            registry,
+        };
+
+        Self::analyze_file_inner(path, context)
+    }
+
+    /// Internal cache-aware file analysis implementation.
+    fn analyze_file_with_cache_inner(
+        path: &Utf8Path,
+        context: AnalysisContext<'_>,
+        cache: &ScanCache,
+    ) -> Result<AnalysisOutcome, ScanError> {
+        let contents =
+            fs::read_to_string(path.as_std_path()).map_err(|e| ScanError::read(path, e))?;
+        let content_hash = hash_content(&contents);
+        let cache_key = analysis_cache_key(content_hash);
+
+        if let Some(file_info) = cache.get_if_fresh(path, cache_key) {
+            return Ok(AnalysisOutcome {
+                file_info,
+                cache_key,
+                source: AnalysisSource::CacheHit,
+            });
+        }
+
+        let file_info = Self::analyze_contents_inner(path, &contents, content_hash, context)?;
+
+        Ok(AnalysisOutcome {
+            file_info,
+            cache_key,
+            source: AnalysisSource::Parsed,
+        })
     }
 
     /// Internal file analysis implementation.
-    #[allow(clippy::unused_self)] // Method signature kept for consistency
     fn analyze_file_inner(
-        &self,
         path: &Utf8Path,
-        ts_parser: Option<&mut ArenaParser>,
-        tsx_parser: Option<&mut ArenaParser>,
-        arena: &bumpalo::Bump,
-        matcher: &ModelPathMatcher,
-        registry: Option<&ModelRegistry>,
+        context: AnalysisContext<'_>,
     ) -> Result<FileInfo, ScanError> {
-        // Read file contents
         let contents =
             fs::read_to_string(path.as_std_path()).map_err(|e| ScanError::read(path, e))?;
-
-        // Calculate content hash
         let content_hash = hash_content(&contents);
 
+        Self::analyze_contents_inner(path, &contents, content_hash, context)
+    }
+
+    /// Parses and analyzes in-memory source contents.
+    fn analyze_contents_inner(
+        path: &Utf8Path,
+        contents: &str,
+        content_hash: u64,
+        context: AnalysisContext<'_>,
+    ) -> Result<FileInfo, ScanError> {
         // Generate file ID from path hash
         let file_id = FileId::new(hash_path(path));
 
         // Select parser based on extension
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
-        let parser = if is_tsx { tsx_parser.or(ts_parser) } else { ts_parser.or(tsx_parser) };
+        let parser = if is_tsx {
+            context.tsx_parser.or(context.ts_parser)
+        } else {
+            context.ts_parser.or(context.tsx_parser)
+        };
 
         let Some(parser) = parser else {
             return Err(ScanError::config("no parser available"));
         };
 
         // Parse the file
-        let parse_result =
-            parser.parse_with_arena(arena, &contents).map_err(|e| ScanError::parse(path, e))?;
+        let parse_result = parser
+            .parse_with_arena(context.arena, contents)
+            .map_err(|e| ScanError::parse(path, e))?;
+
+        let relation_evidence: SmallVec<[AstRelationEvidence; 4]> =
+            parse_result.relations.into_iter().collect();
 
         // Convert imports to owned and calculate status
         let mut imports: SmallVec<[ImportInfo; 8]> = parse_result
@@ -345,15 +470,21 @@ impl FileAnalyzer {
         // Process each import: detect source and optionally filter by registry
         for import in &mut imports {
             // First, detect if this is a shared directory import
-            if let Some(detected_source) = detect_model_source_with(&import.path, matcher) {
+            if let Some(detected_source) = detect_model_source_with(&import.path, context.matcher) {
                 // If we have a registry, validate that at least one imported name
                 // is a known model export from the detected source
-                if let Some(reg) = registry {
-                    let has_model_export =
-                        import.names.iter().any(|name| reg.is_export_from(name, detected_source));
+                if let Some(reg) = context.registry {
+                    let has_model_export = import
+                        .names
+                        .iter()
+                        .any(|name| reg.is_export_from(name, detected_source));
 
                     // Only mark as model import if it has actual model exports
-                    import.source = if has_model_export { Some(detected_source) } else { None };
+                    import.source = if has_model_export {
+                        Some(detected_source)
+                    } else {
+                        None
+                    };
                 } else {
                     // No registry - use path-based detection only
                     import.source = Some(detected_source);
@@ -364,20 +495,108 @@ impl FileAnalyzer {
         }
 
         let status = determine_status(&imports);
+        let model_refs = build_model_refs(&imports, &relation_evidence, context.registry);
 
         // Get current timestamp
-        let last_scanned =
-            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let last_scanned = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
         Ok(FileInfo {
             id: file_id,
             path: path.to_owned(),
             content_hash,
             imports,
-            model_refs: SmallVec::new(), // TODO: populate from imports
+            model_refs,
+            relation_evidence,
             status,
             last_scanned,
         })
+    }
+}
+
+/// Builds deterministic model references from imports and relation evidence.
+///
+/// Order is stable by first-seen occurrence:
+/// 1. import-derived references
+/// 2. relation source/target references
+fn build_model_refs(
+    imports: &[ImportInfo],
+    relation_evidence: &[AstRelationEvidence],
+    registry: Option<&ModelRegistry>,
+) -> SmallVec<[ModelReference; 4]> {
+    let mut model_refs = SmallVec::new();
+    let mut seen: FxHashSet<(String, ModelCategory, ModelSource)> = FxHashSet::default();
+
+    for import in imports {
+        let Some(source) = import.source else {
+            continue;
+        };
+
+        for symbol in &import.names {
+            if let Some(model_ref) = model_ref_from_import_symbol(symbol, source, registry) {
+                push_unique_model_ref(&mut model_refs, &mut seen, model_ref);
+            }
+        }
+    }
+
+    for evidence in relation_evidence {
+        push_unique_model_ref(&mut model_refs, &mut seen, evidence.source.clone());
+        push_unique_model_ref(&mut model_refs, &mut seen, evidence.target.clone());
+    }
+
+    model_refs
+}
+
+/// Builds a model reference from an import symbol when it passes source validation.
+fn model_ref_from_import_symbol(
+    symbol: &str,
+    source: ModelSource,
+    registry: Option<&ModelRegistry>,
+) -> Option<ModelReference> {
+    if registry.is_some_and(|reg| !reg.is_export_from(symbol, source)) {
+        return None;
+    }
+
+    Some(ModelReference::new(
+        symbol,
+        infer_model_category(symbol),
+        source,
+    ))
+}
+
+/// Infers model category from canonical `ClickHome` symbol suffixes.
+#[inline]
+fn infer_model_category(symbol: &str) -> ModelCategory {
+    if symbol.ends_with(ModelCategory::ServiceCodeGen.suffix()) {
+        ModelCategory::ServiceCodeGen
+    } else if symbol.ends_with(ModelCategory::CodeGenFormArray.suffix()) {
+        ModelCategory::CodeGenFormArray
+    } else if symbol.ends_with(ModelCategory::CodeGenForApi.suffix()) {
+        ModelCategory::CodeGenForApi
+    } else if symbol.ends_with(ModelCategory::CodeGenForm.suffix()) {
+        ModelCategory::CodeGenForm
+    } else if symbol.ends_with(ModelCategory::CodeGen.suffix()) {
+        ModelCategory::CodeGen
+    } else if symbol.ends_with(ModelCategory::Service.suffix()) {
+        ModelCategory::Service
+    } else if symbol.ends_with(ModelCategory::Interface.suffix()) {
+        ModelCategory::Interface
+    } else {
+        ModelCategory::Model
+    }
+}
+
+#[inline]
+fn push_unique_model_ref(
+    model_refs: &mut SmallVec<[ModelReference; 4]>,
+    seen: &mut FxHashSet<(String, ModelCategory, ModelSource)>,
+    model_ref: ModelReference,
+) {
+    let key = (model_ref.name.clone(), model_ref.category, model_ref.source);
+    if seen.insert(key) {
+        model_refs.push(model_ref);
     }
 }
 
@@ -419,6 +638,10 @@ fn hash_content(content: &str) -> u64 {
     hasher.finish()
 }
 
+fn analysis_cache_key(content_hash: u64) -> AnalysisCacheKey {
+    AnalysisCacheKey::new(content_hash, parser_version_hash(), query_version_hash())
+}
+
 /// Computes a fast hash of a file path using `FxHash`.
 fn hash_path(path: &Utf8Path) -> u64 {
     let mut hasher = FxHasher::default();
@@ -428,8 +651,13 @@ fn hash_path(path: &Utf8Path) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
-    use ch_core::{ImportKind, SourceLocation};
+    use camino::Utf8PathBuf;
+    use ch_core::{EdgeKind, ImportKind, ModelDefinition, SourceLocation};
+    use smallvec::smallvec;
 
     fn make_import(source: Option<ModelSource>) -> ImportInfo {
         ImportInfo::new(
@@ -449,13 +677,19 @@ mod tests {
 
     #[test]
     fn test_determine_status_legacy() {
-        let imports = vec![make_import(Some(ModelSource::SharedLegacy)), make_import(None)];
+        let imports = vec![
+            make_import(Some(ModelSource::SharedLegacy)),
+            make_import(None),
+        ];
         assert_eq!(determine_status(&imports), MigrationStatus::Legacy);
     }
 
     #[test]
     fn test_determine_status_migrated() {
-        let imports = vec![make_import(Some(ModelSource::Shared2023)), make_import(None)];
+        let imports = vec![
+            make_import(Some(ModelSource::Shared2023)),
+            make_import(None),
+        ];
         assert_eq!(determine_status(&imports), MigrationStatus::Migrated);
     }
 
@@ -502,5 +736,139 @@ mod tests {
         let hash1 = hash_path(Utf8Path::new("src/foo.ts"));
         let hash2 = hash_path(Utf8Path::new("src/bar.ts"));
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_infer_model_category_suffixes() {
+        assert_eq!(infer_model_category("Order"), ModelCategory::Model);
+        assert_eq!(infer_model_category("OrderModel"), ModelCategory::Interface);
+        assert_eq!(infer_model_category("OrderCodeGen"), ModelCategory::CodeGen);
+        assert_eq!(
+            infer_model_category("OrderCodeGenForApi"),
+            ModelCategory::CodeGenForApi
+        );
+        assert_eq!(
+            infer_model_category("OrderCodeGenForm"),
+            ModelCategory::CodeGenForm
+        );
+        assert_eq!(
+            infer_model_category("OrderCodeGenFormArray"),
+            ModelCategory::CodeGenFormArray
+        );
+        assert_eq!(infer_model_category("OrderService"), ModelCategory::Service);
+        assert_eq!(
+            infer_model_category("OrderServiceCodeGen"),
+            ModelCategory::ServiceCodeGen
+        );
+    }
+
+    #[test]
+    fn test_build_model_refs_deduplicates_import_and_relation_overlap() {
+        let imports = [ImportInfo::new(
+            "../shared/models/order",
+            ImportKind::Named,
+            smallvec!["OrderModel".to_owned()],
+            Some(ModelSource::SharedLegacy),
+            SourceLocation::default(),
+        )];
+
+        let relations = [AstRelationEvidence::new(
+            EdgeKind::Constructs,
+            ModelReference::new(
+                "CustomerModel",
+                ModelCategory::Model,
+                ModelSource::SharedLegacy,
+            ),
+            ModelReference::new(
+                "OrderModel",
+                ModelCategory::Interface,
+                ModelSource::SharedLegacy,
+            ),
+        )];
+
+        let model_refs = build_model_refs(&imports, &relations, None);
+        assert_eq!(model_refs.len(), 2);
+        assert_eq!(model_refs[0].name, "OrderModel");
+        assert_eq!(model_refs[1].name, "CustomerModel");
+    }
+
+    #[test]
+    fn test_analyze_single_populates_model_refs_and_relation_evidence() {
+        let source = r#"
+import { OrderModel } from "../shared/models/order";
+
+class CustomerModel {
+  createOrder(): OrderModel {
+    return new OrderModel();
+  }
+}
+"#;
+        let file_path = write_temp_typescript_file(source, "ts");
+        let analyzer = FileAnalyzer::new();
+        let matcher = ModelPathMatcher::default();
+        let result = analyzer.analyze_single(&file_path, &matcher, None);
+
+        assert!(result.is_ok());
+        let file = match result {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+
+        assert_eq!(file.status, MigrationStatus::Legacy);
+        assert!(!file.model_refs.is_empty());
+        assert!(file
+            .model_refs
+            .iter()
+            .any(|model| model.name == "OrderModel"));
+        assert!(!file.relation_evidence.is_empty());
+
+        let _ = fs::remove_file(file_path.as_std_path());
+    }
+
+    #[test]
+    fn test_analyze_single_registry_filters_unknown_import_symbols() {
+        let source = r#"
+import { OrderModel, UtilityThing } from "../shared/models/order";
+"#;
+        let file_path = write_temp_typescript_file(source, "ts");
+        let analyzer = FileAnalyzer::new();
+        let matcher = ModelPathMatcher::default();
+
+        let mut registry = ModelRegistry::new();
+        registry.register(ModelDefinition {
+            name: "Order".to_owned(),
+            source: ModelSource::SharedLegacy,
+            definition_path: Utf8PathBuf::from("shared/models/order.ts"),
+            exports: smallvec!["OrderModel".to_owned()],
+        });
+
+        let result = analyzer.analyze_single(&file_path, &matcher, Some(&registry));
+        assert!(result.is_ok());
+        let file = match result {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+
+        assert_eq!(file.status, MigrationStatus::Legacy);
+        assert_eq!(file.model_refs.len(), 1);
+        assert_eq!(file.model_refs[0].name, "OrderModel");
+
+        let _ = fs::remove_file(file_path.as_std_path());
+    }
+
+    fn write_temp_typescript_file(contents: &str, extension: &str) -> Utf8PathBuf {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let std_path =
+            std::env::temp_dir().join(format!("ch_scanner_analyzer_{unique_id}.{extension}"));
+        let write_result = fs::write(&std_path, contents);
+        assert!(write_result.is_ok());
+
+        let utf8_path = Utf8PathBuf::from_path_buf(std_path);
+        assert!(utf8_path.is_ok());
+
+        utf8_path.unwrap_or_default()
     }
 }

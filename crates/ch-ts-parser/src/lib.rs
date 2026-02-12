@@ -4,6 +4,7 @@
 //!
 //! - Extract import statements (static and dynamic)
 //! - Detect model/interface references from shared directories
+//! - Extract normalized model relation evidence with CST anchors
 //! - Support incremental re-parsing on file changes
 //! - Efficiently categorize imports as legacy (`shared/`) or new (`shared_2023/`)
 //!
@@ -162,18 +163,24 @@
 #![deny(clippy::all)]
 #![warn(missing_docs)]
 
+use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
+
+use rustc_hash::FxHasher;
+
 pub mod arena;
 pub mod error;
 pub mod exports;
 mod import;
 mod parser;
 pub mod queries;
+pub mod relations;
 pub mod source;
 
 // Re-export main types for convenient access
 pub use error::ParseError;
 pub use parser::{ArenaParser, BumpParseResult, ParseResult, TsParser};
-pub use source::{ModelPathMatcher, detect_model_source, detect_model_source_with};
+pub use source::{detect_model_source, detect_model_source_with, ModelPathMatcher};
 
 // Re-export arena types for ch-scanner integration
 pub use arena::{ArenaStr, BumpImportBuilder, BumpImportInfo, StringInterner};
@@ -181,10 +188,13 @@ pub use arena::{ArenaStr, BumpImportBuilder, BumpImportInfo, StringInterner};
 // Re-export import extraction functions
 pub use import::{extract_imports, extract_imports_arena};
 
+// Re-export relation extraction functions
+pub use relations::extract_model_relations;
+
 // Re-export export extraction functions and types
 pub use exports::{
-    BumpExportInfo, ExportInfo, extract_exports, extract_exports_arena, get_tsx_export_query,
-    get_typescript_export_query, kebab_to_pascal, pascal_to_kebab,
+    extract_exports, extract_exports_arena, get_tsx_export_query, get_typescript_export_query,
+    kebab_to_pascal, pascal_to_kebab, BumpExportInfo, ExportInfo,
 };
 
 // Re-export tree-sitter types that appear in our public API
@@ -192,3 +202,53 @@ pub use tree_sitter::InputEdit;
 
 // Re-export bumpalo for convenience (consumers need it for ArenaParser)
 pub use bumpalo::Bump;
+
+/// Returns the semantic parser version label used for cache and artifact metadata.
+///
+/// This label tracks the `ch-ts-parser` crate version and should be considered
+/// part of the scanner cache invalidation contract.
+#[must_use]
+pub const fn parser_version() -> &'static str {
+    concat!("ch-ts-parser/", env!("CARGO_PKG_VERSION"))
+}
+
+/// Returns a stable parser version fingerprint for cache keying.
+#[must_use]
+pub fn parser_version_hash() -> u64 {
+    static VERSION_HASH: OnceLock<u64> = OnceLock::new();
+    *VERSION_HASH.get_or_init(|| hash_str(parser_version()))
+}
+
+/// Returns the relation-query fingerprint used for cache invalidation.
+#[must_use]
+pub fn relation_query_hash() -> u64 {
+    static QUERY_HASH: OnceLock<u64> = OnceLock::new();
+    *QUERY_HASH.get_or_init(|| hash_str(queries::RELATION_QUERY))
+}
+
+/// Returns a human-readable relation-query version label.
+#[must_use]
+pub fn relation_query_version() -> &'static str {
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION
+        .get_or_init(|| format!("relation-query/{:016x}", relation_query_hash()))
+        .as_str()
+}
+
+/// Returns a combined query fingerprint covering import and relation queries.
+#[must_use]
+pub fn query_version_hash() -> u64 {
+    static QUERY_VERSION_HASH: OnceLock<u64> = OnceLock::new();
+    *QUERY_VERSION_HASH.get_or_init(|| {
+        let mut hasher = FxHasher::default();
+        queries::IMPORT_QUERY.hash(&mut hasher);
+        queries::RELATION_QUERY.hash(&mut hasher);
+        hasher.finish()
+    })
+}
+
+fn hash_str(value: &str) -> u64 {
+    let mut hasher = FxHasher::default();
+    value.hash(&mut hasher);
+    hasher.finish()
+}

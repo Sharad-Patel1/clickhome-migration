@@ -3,6 +3,7 @@ resolver = "3"
 
 members = [
     "crates/ch-core",
+    "crates/ch-graph",
     "crates/ch-ts-parser",
     "crates/ch-scanner",
     "crates/ch-watcher",
@@ -97,6 +98,7 @@ if_not_else = "allow"
 # Internal Crates
 # -----------------------------------------------------------------------------
 ch-core = { path = "crates/ch-core" }
+ch-graph = { path = "crates/ch-graph" }
 ch-ts-parser = { path = "crates/ch-ts-parser" }
 ch-scanner = { path = "crates/ch-scanner" }
 ch-watcher = { path = "crates/ch-watcher" }
@@ -153,6 +155,11 @@ notify-debouncer-mini = "0.5"
 rayon = "1.10"
 parking_lot = "0.12"
 smallvec = { version = "1.13", features = ["union", "serde"] }
+
+# -----------------------------------------------------------------------------
+# Graph Processing
+# -----------------------------------------------------------------------------
+petgraph = "0.8.3"
 
 # -----------------------------------------------------------------------------
 # CLI

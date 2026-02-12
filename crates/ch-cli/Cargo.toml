@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 # Internal crates
 ch-core.workspace = true
+ch-graph.workspace = true
 ch-tui.workspace = true
 ch-scanner.workspace = true
 ch-ts-parser.workspace = true

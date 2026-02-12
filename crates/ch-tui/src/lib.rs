@@ -52,6 +52,7 @@ pub mod components;
 mod editor;
 pub mod error;
 pub mod event;
+mod graph_artifacts;
 pub mod theme;
 mod toolchain;
 pub mod tui;
@@ -66,7 +67,8 @@ use tracing::{debug, error};
 // Public re-exports
 pub use action::Action;
 pub use app::{
-    App, AppMode, DetailPaneState, FileListState, FilterState, Focus, ScanState, StatusMessage,
+    App, AppMode, DetailPaneState, FileListState, FilterState, Focus, GraphDrilldownState,
+    ScanState, StatusMessage, ViewMode,
 };
 pub use error::TuiError;
 pub use event::Event;

@@ -1,0 +1,82 @@
+{
+  "graph_json": {
+    "top_level_keys": [
+      "diff",
+      "graph",
+      "metadata",
+      "snapshot_mode"
+    ],
+    "metadata_keys": [
+      "counts",
+      "generated_unix_epoch_ms",
+      "object_counts",
+      "parser_metadata",
+      "source_roots"
+    ],
+    "counts_keys": [
+      "edges_by_kind",
+      "file_nodes",
+      "interface_nodes",
+      "model_nodes",
+      "service_nodes",
+      "symbol_nodes",
+      "total_edges",
+      "total_nodes"
+    ],
+    "parser_metadata_keys": [
+      "parser_version",
+      "relation_query_version"
+    ],
+    "graph_keys": [
+      "edges",
+      "node_ids"
+    ],
+    "diff_keys": [
+      "counts",
+      "residual_anchor_hashes"
+    ],
+    "edge_keys": [
+      "anchor_hashes",
+      "evidence_count",
+      "kind",
+      "source_node_id",
+      "target_node_id"
+    ]
+  },
+  "migration_plan_json": {
+    "top_level_keys": [
+      "counts",
+      "metadata",
+      "snapshot_mode",
+      "steps"
+    ],
+    "metadata_keys": [
+      "generated_unix_epoch_ms",
+      "object_counts",
+      "parser_metadata",
+      "source_roots"
+    ],
+    "counts_keys": [
+      "emitted_steps",
+      "total_components",
+      "truncated_components"
+    ],
+    "step_keys": [
+      "component_id",
+      "evidence_anchor_hashes",
+      "impacted_file_count",
+      "order",
+      "prerequisites",
+      "risk_score_bps",
+      "step_id"
+    ]
+  },
+  "migration_plan_md": {
+    "contains_title": true,
+    "contains_snapshot_mode": true,
+    "contains_parser_version": true,
+    "contains_relation_query_version": true,
+    "contains_table_header": true,
+    "contains_table_divider": true
+  }
+}

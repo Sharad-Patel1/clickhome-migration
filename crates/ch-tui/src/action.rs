@@ -107,6 +107,9 @@ pub enum Action {
     /// Toggle the help panel.
     ToggleHelp,
 
+    /// Toggle between file and graph views.
+    ToggleView,
+
     /// Show the help panel.
     ShowHelp,
 
@@ -187,7 +190,10 @@ impl Action {
     /// Returns `true` if this action modifies the filter state.
     #[must_use]
     pub const fn modifies_filter(&self) -> bool {
-        matches!(self, Self::SetFilter(_) | Self::ClearFilter | Self::SetStatusFilter(_))
+        matches!(
+            self,
+            Self::SetFilter(_) | Self::ClearFilter | Self::SetStatusFilter(_)
+        )
     }
 }
 
