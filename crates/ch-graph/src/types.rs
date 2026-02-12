@@ -18,7 +18,7 @@ pub use crate::mapping::{
     MappingStatus, MappingWeights, ModelMapping,
 };
 pub use crate::planner::{
-    EvidenceRef, GraphPlanner, MAX_RISK_BPS, MigrationPlan, MigrationPlanCounts, MigrationStep,
-    PlannerConfig, PlannerRiskWeights, RiskBreakdown, RiskComponentScore, RiskSignalKind,
-    SuggestedReplacement,
+    EvidenceRef, GraphPlanner, MigrationPlan, MigrationPlanCounts, MigrationStep, PlannerConfig,
+    PlannerRiskWeights, RiskBreakdown, RiskComponentScore, RiskSignalKind, SuggestedReplacement,
+    MAX_RISK_BPS,
 };

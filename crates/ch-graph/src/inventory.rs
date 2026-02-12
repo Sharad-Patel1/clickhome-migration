@@ -8,8 +8,10 @@ use camino::Utf8Path;
 use ch_core::{FxHashMap, ModelArtifact, ModelCategory, ModelRegistry, ModelSource};
 use ch_ts_parser::{kebab_to_pascal, pascal_to_kebab};
 
-const DEFAULT_CANONICAL_ID_FALLBACKS: &[(&str, &str)] =
-    &[("HTMLReport", "html-report"), ("OAuthClient", "oauth-client")];
+const DEFAULT_CANONICAL_ID_FALLBACKS: &[(&str, &str)] = &[
+    ("HTMLReport", "html-report"),
+    ("OAuthClient", "oauth-client"),
+];
 
 #[derive(Debug, Default)]
 struct PendingInventoryRecord {
@@ -180,13 +182,16 @@ impl ModelInventoryBuilder {
         for (pascal, canonical) in DEFAULT_CANONICAL_ID_FALLBACKS {
             canonical_id_fallbacks.insert((*pascal).to_owned(), (*canonical).to_owned());
         }
-        Self { canonical_id_fallbacks }
+        Self {
+            canonical_id_fallbacks,
+        }
     }
 
     /// Adds or overrides a single canonical-ID fallback mapping.
     #[must_use]
     pub fn with_fallback(mut self, pascal_name: &str, canonical_id: &str) -> Self {
-        self.canonical_id_fallbacks.insert(pascal_name.to_owned(), canonical_id.to_owned());
+        self.canonical_id_fallbacks
+            .insert(pascal_name.to_owned(), canonical_id.to_owned());
         self
     }
 
@@ -199,7 +204,8 @@ impl ModelInventoryBuilder {
         V: Into<String>,
     {
         for (pascal_name, canonical_id) in fallbacks {
-            self.canonical_id_fallbacks.insert(pascal_name.into(), canonical_id.into());
+            self.canonical_id_fallbacks
+                .insert(pascal_name.into(), canonical_id.into());
         }
         self
     }
@@ -220,7 +226,11 @@ impl ModelInventoryBuilder {
             source_order(left.source)
                 .cmp(&source_order(right.source))
                 .then_with(|| left.name.cmp(&right.name))
-                .then_with(|| left.definition_path.as_str().cmp(right.definition_path.as_str()))
+                .then_with(|| {
+                    left.definition_path
+                        .as_str()
+                        .cmp(right.definition_path.as_str())
+                })
         });
 
         for definition in definitions {
@@ -352,14 +362,22 @@ impl ModelInventoryBuilder {
         let mut fallback_hits: Vec<_> = fallback_usage_counts
             .into_iter()
             .filter_map(|(pascal_name, count)| {
-                self.canonical_id_fallbacks.get(&pascal_name).map(|canonical_id| {
-                    CanonicalFallbackHit { pascal_name, canonical_id: canonical_id.clone(), count }
-                })
+                self.canonical_id_fallbacks
+                    .get(&pascal_name)
+                    .map(|canonical_id| CanonicalFallbackHit {
+                        pascal_name,
+                        canonical_id: canonical_id.clone(),
+                        count,
+                    })
             })
             .collect();
         fallback_hits.sort_by(|left, right| left.pascal_name.cmp(&right.pascal_name));
 
-        ModelInventory { records, ambiguities, fallback_hits }
+        ModelInventory {
+            records,
+            ambiguities,
+            fallback_hits,
+        }
     }
 
     fn canonical_id_from_pascal(
@@ -368,7 +386,9 @@ impl ModelInventoryBuilder {
         fallback_usage_counts: &mut FxHashMap<String, usize>,
     ) -> String {
         if let Some(canonical_id) = self.canonical_id_fallbacks.get(pascal_name) {
-            let count = fallback_usage_counts.entry(pascal_name.to_owned()).or_insert(0);
+            let count = fallback_usage_counts
+                .entry(pascal_name.to_owned())
+                .or_insert(0);
             *count += 1;
             return canonical_id.clone();
         }
@@ -472,7 +492,11 @@ fn infer_export_identity(export_name: &str) -> Option<(String, ModelCategory)> {
 
 fn strip_suffix<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
     let base = value.strip_suffix(suffix)?;
-    if base.is_empty() { None } else { Some(base) }
+    if base.is_empty() {
+        None
+    } else {
+        Some(base)
+    }
 }
 
 fn looks_like_model_symbol(value: &str) -> bool {
@@ -511,7 +535,10 @@ fn is_interfaces_file(path: &Utf8Path) -> bool {
 }
 
 fn is_interfaces_codegen_file(path: &Utf8Path) -> bool {
-    matches!(path.file_name(), Some("interfaces.codegen.ts" | "interfaces.codegen.tsx"))
+    matches!(
+        path.file_name(),
+        Some("interfaces.codegen.ts" | "interfaces.codegen.tsx")
+    )
 }
 
 fn is_model_path(path: &Utf8Path) -> bool {
@@ -593,11 +620,17 @@ mod tests {
             .with_fallback("HTMLReport", "html-report")
             .build(&registry);
 
-        assert!(inventory.find(ModelSource::SharedLegacy, "html-report").is_some());
-        assert!(inventory.find(ModelSource::SharedLegacy, "h-t-m-l-report").is_none());
+        assert!(inventory
+            .find(ModelSource::SharedLegacy, "html-report")
+            .is_some());
+        assert!(inventory
+            .find(ModelSource::SharedLegacy, "h-t-m-l-report")
+            .is_none());
 
-        let fallback =
-            inventory.fallback_hits().iter().find(|entry| entry.pascal_name == "HTMLReport");
+        let fallback = inventory
+            .fallback_hits()
+            .iter()
+            .find(|entry| entry.pascal_name == "HTMLReport");
         assert!(fallback.is_some());
         if let Some(entry) = fallback {
             assert_eq!(entry.canonical_id, "html-report");

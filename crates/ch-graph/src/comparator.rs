@@ -15,8 +15,8 @@ use smallvec::SmallVec;
 
 use crate::inventory::{ModelInventory, ModelInventoryRecord};
 use crate::mapping::{
-    ComparatorConfig, GraphDiff, LegacyResidual, MAX_CONFIDENCE_BPS, MappingReason,
-    MappingReasonKind, MappingStatus, ModelMapping,
+    ComparatorConfig, GraphDiff, LegacyResidual, MappingReason, MappingReasonKind, MappingStatus,
+    ModelMapping, MAX_CONFIDENCE_BPS,
 };
 
 /// Deterministic comparator for legacy-to-modern model mapping.
@@ -132,7 +132,10 @@ fn normalized_thresholds(config: &ComparatorConfig) -> (u16, u16) {
 fn sorted_files(files: &[FileInfo]) -> Vec<&FileInfo> {
     let mut sorted_files: Vec<&FileInfo> = files.iter().collect();
     sorted_files.sort_by(|left, right| {
-        left.path.as_str().cmp(right.path.as_str()).then_with(|| left.id.0.cmp(&right.id.0))
+        left.path
+            .as_str()
+            .cmp(right.path.as_str())
+            .then_with(|| left.id.0.cmp(&right.id.0))
     });
     sorted_files
 }
@@ -162,8 +165,14 @@ fn build_symbol_neighborhoods(files: &[&FileInfo]) -> FxHashMap<SymbolKey, FxHas
             let target_key = SymbolKey::from_model_reference(&relation.target);
             let source_stem = symbol_stem(relation.source.name.as_str());
             let target_stem = symbol_stem(relation.target.name.as_str());
-            neighborhoods.entry(source_key).or_default().insert(target_stem);
-            neighborhoods.entry(target_key).or_default().insert(source_stem);
+            neighborhoods
+                .entry(source_key)
+                .or_default()
+                .insert(target_stem);
+            neighborhoods
+                .entry(target_key)
+                .or_default()
+                .insert(source_stem);
         }
     }
 
@@ -173,7 +182,11 @@ fn build_symbol_neighborhoods(files: &[&FileInfo]) -> FxHashMap<SymbolKey, FxHas
 fn build_record_shapes(
     inventory: &ModelInventory,
     neighborhoods: &FxHashMap<SymbolKey, FxHashSet<String>>,
-) -> (Vec<RecordShape>, Vec<RecordShape>, FxHashMap<String, String>) {
+) -> (
+    Vec<RecordShape>,
+    Vec<RecordShape>,
+    FxHashMap<String, String>,
+) {
     let mut legacy_shapes = Vec::new();
     let mut modern_shapes = Vec::new();
     let mut legacy_stem_lookup_raw: FxHashMap<String, Option<String>> = FxHashMap::default();
@@ -236,8 +249,11 @@ fn record_shape(
     }
 
     let primary = primary_artifact(&artifacts)?;
-    let primary_symbol =
-        ModelReference::new(primary.export_name.clone(), primary.category, primary.source);
+    let primary_symbol = ModelReference::new(
+        primary.export_name.clone(),
+        primary.category,
+        primary.source,
+    );
 
     let mut export_names: FxHashSet<String> = FxHashSet::default();
     let mut interface_stems: FxHashSet<String> = FxHashSet::default();
@@ -297,7 +313,11 @@ fn sorted_artifacts(record: &ModelInventoryRecord) -> Vec<&ModelArtifact> {
         category_order(left.category)
             .cmp(&category_order(right.category))
             .then_with(|| left.export_name.cmp(&right.export_name))
-            .then_with(|| left.definition_path.as_str().cmp(right.definition_path.as_str()))
+            .then_with(|| {
+                left.definition_path
+                    .as_str()
+                    .cmp(right.definition_path.as_str())
+            })
     });
     artifacts
 }
@@ -307,7 +327,11 @@ fn primary_artifact<'a>(artifacts: &'a [&ModelArtifact]) -> Option<&'a ModelArti
         category_order(left.category)
             .cmp(&category_order(right.category))
             .then_with(|| left.export_name.cmp(&right.export_name))
-            .then_with(|| left.definition_path.as_str().cmp(right.definition_path.as_str()))
+            .then_with(|| {
+                left.definition_path
+                    .as_str()
+                    .cmp(right.definition_path.as_str())
+            })
     })
 }
 
@@ -387,8 +411,10 @@ fn evaluate_candidate(
 
     let (neighborhood_intersection, neighborhood_union, neighborhood_overlap_bps) =
         overlap_ratio_bps(&legacy.neighborhood_stems, &modern.neighborhood_stems);
-    let neighborhood_weight =
-        weighted_overlap(config.weights.usage_neighborhood_bps, neighborhood_overlap_bps);
+    let neighborhood_weight = weighted_overlap(
+        config.weights.usage_neighborhood_bps,
+        neighborhood_overlap_bps,
+    );
     if neighborhood_weight > 0 {
         confidence = confidence.saturating_add(u32::from(neighborhood_weight));
         reasons.push(MappingReason::new(
@@ -399,7 +425,9 @@ fn evaluate_candidate(
     }
 
     let bounded_confidence = confidence.min(u32::from(MAX_CONFIDENCE_BPS));
-    let confidence_bps = u16::try_from(bounded_confidence).ok().unwrap_or(MAX_CONFIDENCE_BPS);
+    let confidence_bps = u16::try_from(bounded_confidence)
+        .ok()
+        .unwrap_or(MAX_CONFIDENCE_BPS);
 
     CandidateScore {
         modern_canonical_id: modern.canonical_id.clone(),
@@ -422,7 +450,10 @@ fn build_model_mapping(
     let status = mapping_status(confidence_bps, match_threshold_bps, low_threshold_bps);
     let (modern_canonical_id, modern_symbol) = if status.has_target() {
         best.map_or((None, None), |candidate| {
-            (Some(candidate.modern_canonical_id.clone()), Some(candidate.modern_symbol.clone()))
+            (
+                Some(candidate.modern_canonical_id.clone()),
+                Some(candidate.modern_symbol.clone()),
+            )
         })
     } else {
         (None, None)
@@ -475,8 +506,11 @@ fn build_residuals(
 
     let mut residuals = Vec::new();
     for file in files {
-        let mut legacy_refs: Vec<&ModelReference> =
-            file.model_refs.iter().filter(|model_ref| model_ref.is_legacy()).collect();
+        let mut legacy_refs: Vec<&ModelReference> = file
+            .model_refs
+            .iter()
+            .filter(|model_ref| model_ref.is_legacy())
+            .collect();
         legacy_refs.sort_by(|left, right| compare_model_reference(left, right));
 
         for legacy_ref in legacy_refs {
@@ -541,7 +575,10 @@ fn compare_residual(left: &LegacyResidual, right: &LegacyResidual) -> Ordering {
         .cmp(right.file_path.as_str())
         .then_with(|| compare_model_reference(&left.legacy_symbol, &right.legacy_symbol))
         .then_with(|| {
-            compare_model_reference(&left.suggested_modern_symbol, &right.suggested_modern_symbol)
+            compare_model_reference(
+                &left.suggested_modern_symbol,
+                &right.suggested_modern_symbol,
+            )
         })
 }
 
@@ -614,7 +651,10 @@ fn overlap_ratio_bps(left: &FxHashSet<String>, right: &FxHashSet<String>) -> (us
     } else {
         right.iter().filter(|item| left.contains(*item)).count()
     };
-    let union = left.len().saturating_add(right.len()).saturating_sub(intersection);
+    let union = left
+        .len()
+        .saturating_add(right.len())
+        .saturating_sub(intersection);
 
     if union == 0 {
         return (intersection, union, 0);
@@ -739,7 +779,12 @@ mod tests {
             "Order",
             ModelSource::SharedLegacy,
             "shared/models/order.ts",
-            &["Order", "OrderCodeGen", "OrderService", "OrderServiceCodeGen"],
+            &[
+                "Order",
+                "OrderCodeGen",
+                "OrderService",
+                "OrderServiceCodeGen",
+            ],
         ));
         registry.register(definition(
             "OrderModel",
@@ -757,7 +802,12 @@ mod tests {
             "Order",
             ModelSource::Shared2023,
             "shared_2023/models/order.ts",
-            &["Order", "OrderCodeGen", "OrderService", "OrderServiceCodeGen"],
+            &[
+                "Order",
+                "OrderCodeGen",
+                "OrderService",
+                "OrderServiceCodeGen",
+            ],
         ));
         build_inventory(&registry)
     }
@@ -797,15 +847,21 @@ mod tests {
             ModelCategory::Interface,
             ModelSource::SharedLegacy,
         );
-        let modern_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let modern_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
         let legacy_customer = ModelReference::new(
             "CustomerModel",
             ModelCategory::Interface,
             ModelSource::SharedLegacy,
         );
-        let modern_customer =
-            ModelReference::new("CustomerModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let modern_customer = ModelReference::new(
+            "CustomerModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
 
         let mut legacy_file = FileInfo::new(FileId::new(11), "src/legacy.ts".into());
         legacy_file.status = MigrationStatus::Legacy;
@@ -828,9 +884,10 @@ mod tests {
         assert_eq!(mapping.legacy_canonical_id, "order");
         assert_eq!(mapping.status, MappingStatus::Matched);
         assert!(mapping.modern_symbol.is_some());
-        assert!(
-            mapping.reasons.iter().any(|reason| reason.kind == MappingReasonKind::CanonicalIdExact)
-        );
+        assert!(mapping
+            .reasons
+            .iter()
+            .any(|reason| reason.kind == MappingReasonKind::CanonicalIdExact));
     }
 
     #[test]
@@ -850,18 +907,14 @@ mod tests {
         assert_eq!(mapping.legacy_canonical_id, "legacy-order");
         assert_eq!(mapping.status, MappingStatus::Matched);
         assert!(mapping.modern_symbol.is_some());
-        assert!(
-            !mapping
-                .reasons
-                .iter()
-                .any(|reason| reason.kind == MappingReasonKind::CanonicalIdExact)
-        );
-        assert!(
-            mapping
-                .reasons
-                .iter()
-                .any(|reason| reason.kind == MappingReasonKind::UsageNeighborhoodOverlap)
-        );
+        assert!(!mapping
+            .reasons
+            .iter()
+            .any(|reason| reason.kind == MappingReasonKind::CanonicalIdExact));
+        assert!(mapping
+            .reasons
+            .iter()
+            .any(|reason| reason.kind == MappingReasonKind::UsageNeighborhoodOverlap));
     }
 
     #[test]
@@ -886,8 +939,11 @@ mod tests {
     #[test]
     fn test_compare_emits_residual_legacy_usage() {
         let inventory = exact_match_inventory();
-        let legacy_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy);
+        let legacy_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
 
         let mut file = FileInfo::new(FileId::new(21), "src/order.ts".into());
         file.status = MigrationStatus::Legacy;
@@ -905,10 +961,16 @@ mod tests {
     #[test]
     fn test_compare_is_deterministic_across_file_order() {
         let inventory = exact_match_inventory();
-        let legacy_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy);
-        let modern_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let legacy_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
+        let modern_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
         let mut relation = AstRelationEvidence::new(
             ch_core::EdgeKind::LegacyBridge,
             legacy_order.clone(),

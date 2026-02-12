@@ -392,7 +392,12 @@ impl AstRelationEvidence {
     /// Creates a new relation evidence entry.
     #[must_use]
     pub fn new(relation: EdgeKind, source: ModelReference, target: ModelReference) -> Self {
-        Self { relation, source, target, anchors: SmallVec::new() }
+        Self {
+            relation,
+            source,
+            target,
+            anchors: SmallVec::new(),
+        }
     }
 
     /// Adds a provenance anchor to this relation evidence.
@@ -457,7 +462,11 @@ impl ModelReference {
     #[inline]
     #[must_use]
     pub fn new(name: impl Into<String>, category: ModelCategory, source: ModelSource) -> Self {
-        Self { name: name.into(), category, source }
+        Self {
+            name: name.into(),
+            category,
+            source,
+        }
     }
 
     /// Returns `true` if this reference is from the legacy source.
@@ -756,13 +765,15 @@ impl ModelRegistry {
                 for export in &definition.exports {
                     self.legacy_exports.insert(export.clone());
                 }
-                self.legacy_models.insert(definition.name.clone(), definition);
+                self.legacy_models
+                    .insert(definition.name.clone(), definition);
             }
             ModelSource::Shared2023 => {
                 for export in &definition.exports {
                     self.modern_exports.insert(export.clone());
                 }
-                self.modern_models.insert(definition.name.clone(), definition);
+                self.modern_models
+                    .insert(definition.name.clone(), definition);
             }
         }
     }
@@ -907,7 +918,9 @@ impl ModelRegistry {
 
     /// Returns an iterator over all model definitions.
     pub fn iter_all_models(&self) -> impl Iterator<Item = &ModelDefinition> {
-        self.legacy_models.values().chain(self.modern_models.values())
+        self.legacy_models
+            .values()
+            .chain(self.modern_models.values())
     }
 
     /// Returns a legacy model definition by name, if it exists.
@@ -954,7 +967,10 @@ mod tests {
             serde_json::to_string(&ModelSource::SharedLegacy).unwrap(),
             r#""shared_legacy""#
         );
-        assert_eq!(serde_json::to_string(&ModelSource::Shared2023).unwrap(), r#""shared2023""#);
+        assert_eq!(
+            serde_json::to_string(&ModelSource::Shared2023).unwrap(),
+            r#""shared2023""#
+        );
     }
 
     #[test]
@@ -976,7 +992,10 @@ mod tests {
             (EdgeKind::FactoryCall, r#""factory_call""#),
             (EdgeKind::ServiceParamType, r#""service_param_type""#),
             (EdgeKind::ServiceReturnType, r#""service_return_type""#),
-            (EdgeKind::ModelMapRegistration, r#""model_map_registration""#),
+            (
+                EdgeKind::ModelMapRegistration,
+                r#""model_map_registration""#,
+            ),
             (EdgeKind::LegacyBridge, r#""legacy_bridge""#),
             (EdgeKind::GeneratedFrom, r#""generated_from""#),
         ];
@@ -1048,7 +1067,10 @@ mod tests {
         assert_eq!(artifact.model_name, "Order");
         assert_eq!(artifact.category, ModelCategory::CodeGen);
         assert_eq!(artifact.source, ModelSource::SharedLegacy);
-        assert_eq!(artifact.definition_path, Utf8PathBuf::from("shared/models/order.ts"));
+        assert_eq!(
+            artifact.definition_path,
+            Utf8PathBuf::from("shared/models/order.ts")
+        );
         assert_eq!(artifact.export_name, "OrderCodeGen");
     }
 
@@ -1111,8 +1133,11 @@ mod tests {
 
     #[test]
     fn test_ast_relation_evidence_serialization_round_trip() {
-        let source =
-            ModelReference::new("LegacyOrder", ModelCategory::Model, ModelSource::SharedLegacy);
+        let source = ModelReference::new(
+            "LegacyOrder",
+            ModelCategory::Model,
+            ModelSource::SharedLegacy,
+        );
         let target = ModelReference::new("Order", ModelCategory::Model, ModelSource::Shared2023);
 
         let mut evidence = AstRelationEvidence::new(EdgeKind::LegacyBridge, source, target);
@@ -1138,8 +1163,11 @@ mod tests {
 
     #[test]
     fn test_ast_relation_evidence_json_snapshot() {
-        let source =
-            ModelReference::new("LegacyOrder", ModelCategory::Model, ModelSource::SharedLegacy);
+        let source = ModelReference::new(
+            "LegacyOrder",
+            ModelCategory::Model,
+            ModelSource::SharedLegacy,
+        );
         let target = ModelReference::new("Order", ModelCategory::Model, ModelSource::Shared2023);
 
         let mut evidence = AstRelationEvidence::new(EdgeKind::LegacyBridge, source, target);
@@ -1261,7 +1289,11 @@ mod tests {
             name: "Foo".to_owned(),
             source: ModelSource::SharedLegacy,
             definition_path: "shared/models/foo.ts".into(),
-            exports: smallvec!["Foo".to_owned(), "FooModel".to_owned(), "FooCodeGen".to_owned()],
+            exports: smallvec![
+                "Foo".to_owned(),
+                "FooModel".to_owned(),
+                "FooCodeGen".to_owned()
+            ],
         };
         registry.register(definition);
 

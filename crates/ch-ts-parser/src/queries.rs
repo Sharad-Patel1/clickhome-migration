@@ -289,14 +289,18 @@ pub fn get_tsx_relation_query() -> Result<&'static Query, ParseError> {
 
 /// Compiles the import query for the given language.
 fn compile_query(language: &Language) -> Result<Query, ParseError> {
-    Query::new(language, IMPORT_QUERY)
-        .map_err(|e| ParseError::QueryCompile { offset: e.offset, kind: std::sync::Arc::new(e) })
+    Query::new(language, IMPORT_QUERY).map_err(|e| ParseError::QueryCompile {
+        offset: e.offset,
+        kind: std::sync::Arc::new(e),
+    })
 }
 
 /// Compiles the relation query for the given language.
 fn compile_relation_query(language: &Language) -> Result<Query, ParseError> {
-    Query::new(language, RELATION_QUERY)
-        .map_err(|e| ParseError::QueryCompile { offset: e.offset, kind: std::sync::Arc::new(e) })
+    Query::new(language, RELATION_QUERY).map_err(|e| ParseError::QueryCompile {
+        offset: e.offset,
+        kind: std::sync::Arc::new(e),
+    })
 }
 
 /// Returns the capture name for a given capture index.

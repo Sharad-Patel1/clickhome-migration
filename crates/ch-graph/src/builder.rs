@@ -50,7 +50,10 @@ impl DependencyGraphBuilder {
         parser_version: Option<String>,
         relation_query_version: Option<String>,
     ) -> Self {
-        self.parser_metadata = ParserMetadata { parser_version, relation_query_version };
+        self.parser_metadata = ParserMetadata {
+            parser_version,
+            relation_query_version,
+        };
         self
     }
 
@@ -66,7 +69,10 @@ impl DependencyGraphBuilder {
 
         let mut sorted_files: Vec<&FileInfo> = files.iter().collect();
         sorted_files.sort_by(|left, right| {
-            left.path.as_str().cmp(right.path.as_str()).then_with(|| left.id.0.cmp(&right.id.0))
+            left.path
+                .as_str()
+                .cmp(right.path.as_str())
+                .then_with(|| left.id.0.cmp(&right.id.0))
         });
 
         for file in &sorted_files {
@@ -166,8 +172,18 @@ fn inventory_nodes(inventory: &ModelInventory) -> Vec<GraphNode> {
             record.codegen_interface.as_ref(),
             GraphNodeKind::Interface,
         );
-        push_inventory_node(&mut nodes, record, record.wrapper.as_ref(), GraphNodeKind::Model);
-        push_inventory_node(&mut nodes, record, record.codegen.as_ref(), GraphNodeKind::Model);
+        push_inventory_node(
+            &mut nodes,
+            record,
+            record.wrapper.as_ref(),
+            GraphNodeKind::Model,
+        );
+        push_inventory_node(
+            &mut nodes,
+            record,
+            record.codegen.as_ref(),
+            GraphNodeKind::Model,
+        );
         push_inventory_node(
             &mut nodes,
             record,
@@ -372,8 +388,10 @@ fn build_counts(graph: &DependencyStableGraph) -> GraphCounts {
         *entry += 1;
     }
 
-    let mut edge_kind_counts: Vec<_> =
-        edges_by_kind.into_iter().map(|(kind, count)| GraphEdgeKindCount { kind, count }).collect();
+    let mut edge_kind_counts: Vec<_> = edges_by_kind
+        .into_iter()
+        .map(|(kind, count)| GraphEdgeKindCount { kind, count })
+        .collect();
     edge_kind_counts
         .sort_by(|left, right| edge_kind_order(left.kind).cmp(&edge_kind_order(right.kind)));
     counts.edges_by_kind = edge_kind_counts;
@@ -385,11 +403,18 @@ fn file_node_id(path: &str) -> String {
 }
 
 fn symbol_node_id(source: ModelSource, category: ModelCategory, symbol_name: &str) -> String {
-    format!("symbol:{}:{}:{symbol_name}", source_key(source), category_key(category))
+    format!(
+        "symbol:{}:{}:{symbol_name}",
+        source_key(source),
+        category_key(category)
+    )
 }
 
 fn interface_node_id(source: ModelSource, canonical_id: &str, export_name: &str) -> String {
-    format!("interface:{}:{canonical_id}:{export_name}", source_key(source))
+    format!(
+        "interface:{}:{canonical_id}:{export_name}",
+        source_key(source)
+    )
 }
 
 fn model_node_id(source: ModelSource, canonical_id: &str, export_name: &str) -> String {
@@ -397,7 +422,10 @@ fn model_node_id(source: ModelSource, canonical_id: &str, export_name: &str) -> 
 }
 
 fn service_node_id(source: ModelSource, canonical_id: &str, export_name: &str) -> String {
-    format!("service:{}:{canonical_id}:{export_name}", source_key(source))
+    format!(
+        "service:{}:{canonical_id}:{export_name}",
+        source_key(source)
+    )
 }
 
 fn source_key(source: ModelSource) -> &'static str {
@@ -500,8 +528,13 @@ mod tests {
             assert!(edge.has_evidence());
         }
 
-        let kinds: FxHashSet<EdgeKind> =
-            graph.metadata().counts.edges_by_kind.iter().map(|entry| entry.kind).collect();
+        let kinds: FxHashSet<EdgeKind> = graph
+            .metadata()
+            .counts
+            .edges_by_kind
+            .iter()
+            .map(|entry| entry.kind)
+            .collect();
         assert!(kinds.contains(&EdgeKind::LegacyBridge));
         assert!(kinds.contains(&EdgeKind::Constructs));
     }
@@ -519,7 +552,10 @@ mod tests {
         let graph_b = builder.build(&inventory, &reversed_files);
 
         assert_eq!(collect_node_ids(&graph_a), collect_node_ids(&graph_b));
-        assert_eq!(collect_edge_fingerprints(&graph_a), collect_edge_fingerprints(&graph_b));
+        assert_eq!(
+            collect_edge_fingerprints(&graph_a),
+            collect_edge_fingerprints(&graph_b)
+        );
         assert_eq!(graph_a.metadata().counts, graph_b.metadata().counts);
     }
 
@@ -527,10 +563,16 @@ mod tests {
     fn test_relation_edge_evidence_is_deduplicated() {
         let inventory = sample_inventory();
 
-        let source =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy);
-        let target =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let source = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
+        let target = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
 
         let relation = make_relation(
             "src/components/duplicate.ts",
@@ -540,8 +582,10 @@ mod tests {
             42,
         );
 
-        let mut file =
-            FileInfo::new(FileId::new(10), Utf8PathBuf::from("src/components/duplicate.ts"));
+        let mut file = FileInfo::new(
+            FileId::new(10),
+            Utf8PathBuf::from("src/components/duplicate.ts"),
+        );
         file.status = MigrationStatus::Partial;
         file.relation_evidence = smallvec![relation.clone(), relation];
 
@@ -587,10 +631,16 @@ mod tests {
     }
 
     fn sample_files() -> Vec<FileInfo> {
-        let legacy_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy);
-        let modern_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let legacy_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
+        let modern_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
         let modern_wrapper =
             ModelReference::new("Order", ModelCategory::Model, ModelSource::Shared2023);
 

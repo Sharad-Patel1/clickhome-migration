@@ -7,8 +7,8 @@ use std::fmt;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{CstAnchor, ModelReference};
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use thiserror::Error;
 
 /// Default artifact directory name.
@@ -86,7 +86,9 @@ impl GraphArtifacts {
 
     /// Returns an iterator of plan steps associated with a node id.
     pub fn steps_for_node(&self, node_id: &str) -> impl Iterator<Item = &PlanStepSummary> {
-        self.steps.iter().filter(move |step| step.node_ids.iter().any(|id| id == node_id))
+        self.steps
+            .iter()
+            .filter(move |step| step.node_ids.iter().any(|id| id == node_id))
     }
 
     fn from_json(graph: GraphArtifactJson, plan: PlanArtifactJson) -> Self {
@@ -454,13 +456,20 @@ struct PlanArtifactStep {
 
 fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T, GraphArtifactError> {
     if !path.exists() {
-        return Err(GraphArtifactError::Missing { path: path.to_path_buf() });
+        return Err(GraphArtifactError::Missing {
+            path: path.to_path_buf(),
+        });
     }
 
-    let raw = std::fs::read_to_string(path.as_std_path())
-        .map_err(|source| GraphArtifactError::Read { path: path.to_path_buf(), source })?;
-    serde_json::from_str(&raw)
-        .map_err(|source| GraphArtifactError::Parse { path: path.to_path_buf(), source })
+    let raw =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| GraphArtifactError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    serde_json::from_str(&raw).map_err(|source| GraphArtifactError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 #[cfg(test)]

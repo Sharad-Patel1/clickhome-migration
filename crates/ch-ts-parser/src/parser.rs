@@ -144,7 +144,11 @@ impl BumpParseResult<'_> {
     #[must_use]
     pub fn into_owned(self) -> ParseResult {
         ParseResult {
-            imports: self.imports.into_iter().map(BumpImportInfo::into_owned).collect(),
+            imports: self
+                .imports
+                .into_iter()
+                .map(BumpImportInfo::into_owned)
+                .collect(),
             relations: self.relations,
             tree: self.tree,
         }
@@ -225,9 +229,15 @@ impl TsParser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
 
-        parser.set_language(&language).map_err(|_| ParseError::LanguageInit)?;
+        parser
+            .set_language(&language)
+            .map_err(|_| ParseError::LanguageInit)?;
 
-        Ok(Self { parser, language, kind: ParserKind::TypeScript })
+        Ok(Self {
+            parser,
+            language,
+            kind: ParserKind::TypeScript,
+        })
     }
 
     /// Creates a new TypeScript TSX parser.
@@ -252,9 +262,15 @@ impl TsParser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TSX.into();
 
-        parser.set_language(&language).map_err(|_| ParseError::LanguageInit)?;
+        parser
+            .set_language(&language)
+            .map_err(|_| ParseError::LanguageInit)?;
 
-        Ok(Self { parser, language, kind: ParserKind::Tsx })
+        Ok(Self {
+            parser,
+            language,
+            kind: ParserKind::Tsx,
+        })
     }
 
     /// Returns the appropriate import query for this parser's language.
@@ -320,7 +336,11 @@ impl TsParser {
             None,
         );
 
-        Ok(ParseResult { imports, relations, tree })
+        Ok(ParseResult {
+            imports,
+            relations,
+            tree,
+        })
     }
 
     /// Incrementally re-parses TypeScript source after an edit.
@@ -380,7 +400,10 @@ impl TsParser {
         edited_tree.edit(edit);
 
         // Parse with the edited tree as a hint
-        let tree = self.parser.parse(source, Some(&edited_tree)).ok_or(ParseError::Parse)?;
+        let tree = self
+            .parser
+            .parse(source, Some(&edited_tree))
+            .ok_or(ParseError::Parse)?;
 
         let query = self.get_query()?;
         let imports = extract_imports(&tree, source, query);
@@ -393,7 +416,11 @@ impl TsParser {
             None,
         );
 
-        Ok(ParseResult { imports, relations, tree })
+        Ok(ParseResult {
+            imports,
+            relations,
+            tree,
+        })
     }
 
     /// Returns the tree-sitter language used by this parser.
@@ -408,7 +435,9 @@ impl TsParser {
 
 impl std::fmt::Debug for TsParser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TsParser").field("language", &"TypeScript").finish_non_exhaustive()
+        f.debug_struct("TsParser")
+            .field("language", &"TypeScript")
+            .finish_non_exhaustive()
     }
 }
 
@@ -496,9 +525,14 @@ impl ArenaParser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
 
-        parser.set_language(&language).map_err(|_| ParseError::LanguageInit)?;
+        parser
+            .set_language(&language)
+            .map_err(|_| ParseError::LanguageInit)?;
 
-        Ok(Self { parser, kind: ParserKind::TypeScript })
+        Ok(Self {
+            parser,
+            kind: ParserKind::TypeScript,
+        })
     }
 
     /// Creates a new arena-based TSX parser.
@@ -522,9 +556,14 @@ impl ArenaParser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TSX.into();
 
-        parser.set_language(&language).map_err(|_| ParseError::LanguageInit)?;
+        parser
+            .set_language(&language)
+            .map_err(|_| ParseError::LanguageInit)?;
 
-        Ok(Self { parser, kind: ParserKind::Tsx })
+        Ok(Self {
+            parser,
+            kind: ParserKind::Tsx,
+        })
     }
 
     /// Returns the appropriate import query for this parser's language.
@@ -598,7 +637,11 @@ impl ArenaParser {
             None,
         );
 
-        Ok(BumpParseResult { imports, relations, tree })
+        Ok(BumpParseResult {
+            imports,
+            relations,
+            tree,
+        })
     }
 
     /// Incrementally re-parses TypeScript source using the provided arena.
@@ -634,7 +677,10 @@ impl ArenaParser {
         edited_tree.edit(edit);
 
         // Parse with the edited tree as a hint
-        let tree = self.parser.parse(source, Some(&edited_tree)).ok_or(ParseError::Parse)?;
+        let tree = self
+            .parser
+            .parse(source, Some(&edited_tree))
+            .ok_or(ParseError::Parse)?;
 
         let query = self.get_query()?;
         let imports = extract_imports_arena(arena, &tree, source, query);
@@ -647,13 +693,19 @@ impl ArenaParser {
             None,
         );
 
-        Ok(BumpParseResult { imports, relations, tree })
+        Ok(BumpParseResult {
+            imports,
+            relations,
+            tree,
+        })
     }
 }
 
 impl std::fmt::Debug for ArenaParser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArenaParser").field("kind", &self.kind).finish_non_exhaustive()
+        f.debug_struct("ArenaParser")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
     }
 }
 
@@ -704,9 +756,15 @@ import { Component } from '@angular/core';
         // Verify we correctly identified sources
         let legacy = result.imports.iter().find(|i| i.is_legacy_import());
         assert!(legacy.is_some());
-        assert!(legacy.expect("Should have legacy import").path.contains("shared/models"));
+        assert!(legacy
+            .expect("Should have legacy import")
+            .path
+            .contains("shared/models"));
 
-        let new = result.imports.iter().find(|i| i.source == Some(ModelSource::Shared2023));
+        let new = result
+            .imports
+            .iter()
+            .find(|i| i.source == Some(ModelSource::Shared2023));
         assert!(new.is_some());
     }
 
@@ -853,7 +911,9 @@ const App = () => <div>Hello</div>;
         let arena = Bump::new();
         let source = r#"import { Foo } from '../shared/models/foo';"#;
 
-        let result = parser.parse_with_arena(&arena, source).expect("Parse failed");
+        let result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
         assert_eq!(result.imports.len(), 1);
         assert!(result.imports[0].is_legacy_import());
     }
@@ -864,7 +924,9 @@ const App = () => <div>Hello</div>;
         let arena = Bump::new();
         let source = r#"import { Foo, Bar } from '../shared/models/foo';"#;
 
-        let result = parser.parse_with_arena(&arena, source).expect("Parse failed");
+        let result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
 
         // Convert to owned ParseResult
         let owned: ParseResult = result.into();
@@ -881,7 +943,9 @@ const App = () => <div>Hello</div>;
 
         // Initial parse
         let source1 = "import { Foo } from './foo';";
-        let result1 = parser.parse_with_arena(&arena1, source1).expect("Parse failed");
+        let result1 = parser
+            .parse_with_arena(&arena1, source1)
+            .expect("Parse failed");
         assert_eq!(result1.imports.len(), 1);
 
         // Edit: add Bar to the import
@@ -915,7 +979,9 @@ import { Foo } from '../shared/models/foo';
 const App = () => <div>Hello</div>;
 "#;
 
-        let result = parser.parse_with_arena(&arena, source).expect("Parse failed");
+        let result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
         assert_eq!(result.imports.len(), 2);
     }
 
@@ -936,7 +1002,9 @@ import { Foo } from '../shared/models/foo';
 import { Bar } from '../shared_2023/models/bar';
 "#;
 
-        let bump_result = parser.parse_with_arena(&arena, source).expect("Parse failed");
+        let bump_result = parser
+            .parse_with_arena(&arena, source)
+            .expect("Parse failed");
         assert_eq!(bump_result.imports.len(), 2);
 
         // Convert explicitly

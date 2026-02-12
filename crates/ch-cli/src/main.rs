@@ -28,15 +28,15 @@ use std::time::Instant;
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
 use ch_graph::{
-    DependencyGraphBuilder, GraphArtifactFormat, GraphArtifactSnapshotMode, GraphComparator,
-    GraphPlanner, PlannerConfig, build_inventory, export_artifacts,
+    build_inventory, export_artifacts, DependencyGraphBuilder, GraphArtifactFormat,
+    GraphArtifactSnapshotMode, GraphComparator, GraphPlanner, PlannerConfig,
 };
 use ch_scanner::{ScanConfig as ScannerConfig, Scanner, StatsSnapshot};
-use ch_ts_parser::{ModelPathMatcher, parser_version, relation_query_version};
+use ch_ts_parser::{parser_version, relation_query_version, ModelPathMatcher};
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing::info;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 // =============================================================================
 // CLI ARGUMENT TYPES
@@ -195,7 +195,12 @@ fn init_tracing(verbose: bool, no_color: bool, is_tui: bool) -> Option<WorkerGua
     if is_tui {
         let (writer, guard) = create_watch_log_writer();
         tracing_subscriber::registry()
-            .with(fmt::layer().with_target(false).with_ansi(false).with_writer(writer))
+            .with(
+                fmt::layer()
+                    .with_target(false)
+                    .with_ansi(false)
+                    .with_writer(writer),
+            )
             .with(filter)
             .init();
         Some(guard)
@@ -252,7 +257,10 @@ fn split_log_path(path: &Path) -> (PathBuf, String) {
 ///
 /// Returns an error if the path is not provided, doesn't exist, or isn't a directory.
 fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Config> {
-    let path = cli.path.clone().unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
+    let path = cli
+        .path
+        .clone()
+        .unwrap_or_else(|| Utf8PathBuf::from("./WebApp.Desktop/src"));
 
     // Validate path exists
     if !path.exists() {
@@ -266,16 +274,20 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
 
     let mut config = Config::default();
     config.scan.root_path = path;
-    config.scan.shared_path =
-        cli.shared_path.clone().unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
+    config.scan.shared_path = cli
+        .shared_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join("app").join("shared"));
     config.scan.shared_2023_path = cli
         .shared_2023_path
         .clone()
         .unwrap_or_else(|| config.scan.root_path.join("app").join("shared_2023"));
 
     // Set app_path: use CLI arg or default to ./WebApp.Desktop/src/app
-    config.scan.app_path =
-        cli.app_path.clone().unwrap_or_else(|| config.scan.root_path.join("app"));
+    config.scan.app_path = cli
+        .app_path
+        .clone()
+        .unwrap_or_else(|| config.scan.root_path.join("app"));
 
     if let Some(name) = config.scan.shared_path.file_name() {
         config.scan.shared_dir = name.to_owned();
@@ -286,7 +298,11 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
     config.editor.editor.clone_from(&cli.editor);
 
     validate_dir(&config.scan.shared_path, "shared", require_shared_paths)?;
-    validate_dir(&config.scan.shared_2023_path, "shared_2023", require_shared_paths)?;
+    validate_dir(
+        &config.scan.shared_2023_path,
+        "shared_2023",
+        require_shared_paths,
+    )?;
     // app_path is always required since we scan it for model consumers
     validate_dir(&config.scan.app_path, "app", true)?;
 
@@ -296,20 +312,26 @@ fn build_config(cli: &Cli, require_shared_paths: bool) -> color_eyre::Result<Con
 fn validate_dir(path: &Utf8PathBuf, label: &str, required: bool) -> color_eyre::Result<()> {
     if path.as_str().is_empty() {
         if required {
-            return Err(color_eyre::eyre::eyre!("{label} path is required but missing."));
+            return Err(color_eyre::eyre::eyre!(
+                "{label} path is required but missing."
+            ));
         }
         return Ok(());
     }
 
     if !path.exists() {
         if required {
-            return Err(color_eyre::eyre::eyre!("{label} path does not exist: {path}"));
+            return Err(color_eyre::eyre::eyre!(
+                "{label} path does not exist: {path}"
+            ));
         }
         return Ok(());
     }
 
     if !path.is_dir() {
-        return Err(color_eyre::eyre::eyre!("{label} path is not a directory: {path}"));
+        return Err(color_eyre::eyre::eyre!(
+            "{label} path is not a directory: {path}"
+        ));
     }
 
     Ok(())
@@ -398,7 +420,7 @@ async fn run_watch(config: Config, no_watch: bool) -> color_eyre::Result<()> {
     // Handle SIGTERM for graceful shutdown on Unix
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{SignalKind, signal};
+        use tokio::signal::unix::{signal, SignalKind};
 
         let mut sigterm = signal(SignalKind::terminate())?;
 
@@ -471,7 +493,9 @@ fn run_graph(
     max_steps: Option<usize>,
 ) -> color_eyre::Result<()> {
     if matches!(max_steps, Some(0)) {
-        return Err(color_eyre::eyre::eyre!("--max-steps must be greater than 0 when provided."));
+        return Err(color_eyre::eyre::eyre!(
+            "--max-steps must be greater than 0 when provided."
+        ));
     }
 
     if output_dir.exists() && !output_dir.is_dir() {
@@ -517,8 +541,10 @@ fn run_graph(
     let graph_phase_elapsed = graph_phase_start.elapsed();
 
     let plan_phase_start = Instant::now();
-    let planner =
-        GraphPlanner::with_config(PlannerConfig { max_steps, ..PlannerConfig::default() });
+    let planner = GraphPlanner::with_config(PlannerConfig {
+        max_steps,
+        ..PlannerConfig::default()
+    });
     let plan = planner.plan(&graph, &diff);
     let plan_phase_elapsed = plan_phase_start.elapsed();
 
@@ -595,13 +621,29 @@ fn print_stats_summary(stats: &StatsSnapshot) {
     let _ = writeln!(handle, "========================");
     let _ = writeln!(handle);
     let _ = writeln!(handle, "Total files scanned: {}", stats.total);
-    let _ = writeln!(handle, "  Legacy:           {} (need migration)", stats.legacy);
-    let _ = writeln!(handle, "  Partial:          {} (in progress)", stats.partial);
+    let _ = writeln!(
+        handle,
+        "  Legacy:           {} (need migration)",
+        stats.legacy
+    );
+    let _ = writeln!(
+        handle,
+        "  Partial:          {} (in progress)",
+        stats.partial
+    );
     let _ = writeln!(handle, "  Migrated:         {} (complete)", stats.migrated);
-    let _ = writeln!(handle, "  No models:        {} (no action needed)", stats.no_models);
+    let _ = writeln!(
+        handle,
+        "  No models:        {} (no action needed)",
+        stats.no_models
+    );
     let _ = writeln!(handle, "  Errors:           {}", stats.errors);
     let _ = writeln!(handle);
-    let _ = writeln!(handle, "Migration progress: {:.1}%", stats.progress_percent());
+    let _ = writeln!(
+        handle,
+        "Migration progress: {:.1}%",
+        stats.progress_percent()
+    );
     let _ = writeln!(handle, "Files needing work: {}", stats.needs_migration());
 }
 
@@ -706,7 +748,12 @@ async fn main() -> color_eyre::Result<()> {
             let config = build_config(&cli, true)?;
             run_report(&config, *format, output.clone())
         }
-        Commands::Graph { output_dir, snapshot_mode, format, max_steps } => {
+        Commands::Graph {
+            output_dir,
+            snapshot_mode,
+            format,
+            max_steps,
+        } => {
             let config = build_config(&cli, true)?;
             run_graph(&config, output_dir, *snapshot_mode, *format, *max_steps)
         }
@@ -717,7 +764,7 @@ async fn main() -> color_eyre::Result<()> {
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     #[test]
     fn test_graph_command_defaults() {
@@ -726,7 +773,12 @@ mod tests {
 
         if let Ok(cli) = parsed {
             match cli.command {
-                Commands::Graph { output_dir, snapshot_mode, format, max_steps } => {
+                Commands::Graph {
+                    output_dir,
+                    snapshot_mode,
+                    format,
+                    max_steps,
+                } => {
                     assert_eq!(output_dir, Utf8PathBuf::from("./graph-artifacts"));
                     assert_eq!(snapshot_mode, GraphSnapshotMode::Minimal);
                     assert_eq!(format, GraphOutputFormat::All);
@@ -763,14 +815,26 @@ mod tests {
 
         if let Ok(cli) = parsed {
             assert_eq!(cli.path, Some(Utf8PathBuf::from("/tmp/project/src")));
-            assert_eq!(cli.shared_path, Some(Utf8PathBuf::from("/tmp/project/src/app/shared")));
+            assert_eq!(
+                cli.shared_path,
+                Some(Utf8PathBuf::from("/tmp/project/src/app/shared"))
+            );
             assert_eq!(
                 cli.shared_2023_path,
                 Some(Utf8PathBuf::from("/tmp/project/src/app/shared_2023"))
             );
-            assert_eq!(cli.app_path, Some(Utf8PathBuf::from("/tmp/project/src/app")));
+            assert_eq!(
+                cli.app_path,
+                Some(Utf8PathBuf::from("/tmp/project/src/app"))
+            );
 
-            if let Commands::Graph { output_dir, snapshot_mode, format, max_steps } = cli.command {
+            if let Commands::Graph {
+                output_dir,
+                snapshot_mode,
+                format,
+                max_steps,
+            } = cli.command
+            {
                 assert_eq!(output_dir, Utf8PathBuf::from("/tmp/project/out"));
                 assert_eq!(snapshot_mode, GraphSnapshotMode::Full);
                 assert_eq!(format, GraphOutputFormat::Md);
@@ -945,7 +1009,8 @@ mod tests {
 
         let graph_json = read_json_file(output_dir.join("graph.json").as_path());
         let plan_json = read_json_file(output_dir.join("migration-plan.json").as_path());
-        let markdown = std::fs::read_to_string(output_dir.join("migration-plan.md").as_std_path()).ok();
+        let markdown =
+            std::fs::read_to_string(output_dir.join("migration-plan.md").as_std_path()).ok();
         assert!(graph_json.is_some());
         assert!(plan_json.is_some());
         assert!(markdown.is_some());
@@ -964,8 +1029,8 @@ mod tests {
         };
 
         let summary = contract_summary(&graph_json, &plan_json, &markdown);
-        let expected_path =
-            workspace_root().join("test-fixtures/graph-planner/golden/ng15-mini/contract-summary.json");
+        let expected_path = workspace_root()
+            .join("test-fixtures/graph-planner/golden/ng15-mini/contract-summary.json");
         let expected = read_json_file(expected_path.as_path());
         assert!(expected.is_some());
         if let Some(expected) = expected {
@@ -1167,8 +1232,9 @@ mod tests {
                     .map(|key| {
                         let key_json =
                             serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_owned());
-                        let value_json =
-                            map.get(key).map_or_else(|| "null".to_owned(), canonical_json_string);
+                        let value_json = map
+                            .get(key)
+                            .map_or_else(|| "null".to_owned(), canonical_json_string);
                         format!("{key_json}:{value_json}")
                     })
                     .collect::<Vec<_>>()
@@ -1228,7 +1294,10 @@ mod tests {
     }
 
     fn object_keys_for_nested(value: &Value, first: &str, second: &str) -> Vec<String> {
-        value.get(first).and_then(|nested| nested.get(second)).map_or_else(Vec::new, object_keys)
+        value
+            .get(first)
+            .and_then(|nested| nested.get(second))
+            .map_or_else(Vec::new, object_keys)
     }
 
     fn first_array_object_keys(value: &Value, parent: &str, child: &str) -> Vec<String> {

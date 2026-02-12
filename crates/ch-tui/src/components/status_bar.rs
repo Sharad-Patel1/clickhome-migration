@@ -45,7 +45,10 @@ impl<'a> StatusBar<'a> {
         };
         spans.push(Span::styled(
             format!(" {mode_text} "),
-            Style::default().fg(Color::Black).bg(self.theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(self.theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
 
@@ -56,7 +59,10 @@ impl<'a> StatusBar<'a> {
         };
         spans.push(Span::styled(
             format!(" {view_text} "),
-            Style::default().fg(Color::Black).bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
 
@@ -73,7 +79,10 @@ impl<'a> StatusBar<'a> {
 
         // Filter indicator
         if self.app.filter.is_active() {
-            spans.push(Span::styled("Filter (path/model): ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "Filter (path/model): ",
+                Style::default().fg(Color::DarkGray),
+            ));
             if !self.app.filter.text.is_empty() {
                 spans.push(Span::styled(
                     format!("\"{}\"", self.app.filter.text),
@@ -82,14 +91,20 @@ impl<'a> StatusBar<'a> {
                 spans.push(Span::raw(" "));
             }
             if let Some(status) = self.app.filter.status {
-                spans.push(Span::styled(status.label(), self.theme.status_style(status)));
+                spans.push(Span::styled(
+                    status.label(),
+                    self.theme.status_style(status),
+                ));
             }
             spans.push(Span::raw(" │ "));
         }
 
         // Sort indicator
         spans.push(Span::styled("Sort: ", Style::default().fg(Color::DarkGray)));
-        spans.push(Span::styled(self.app.sort_mode().label(), Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled(
+            self.app.sort_mode().label(),
+            Style::default().fg(Color::Cyan),
+        ));
         spans.push(Span::raw(" │ "));
 
         // File count

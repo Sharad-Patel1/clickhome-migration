@@ -26,7 +26,11 @@ impl<'a> GraphSummaryPanel<'a> {
         error: Option<&'a str>,
         theme: &'a Theme,
     ) -> Self {
-        Self { summary, error, theme }
+        Self {
+            summary,
+            error,
+            theme,
+        }
     }
 
     fn build_lines(&self) -> Vec<Line<'a>> {
@@ -63,7 +67,10 @@ impl<'a> GraphSummaryPanel<'a> {
                 ]),
                 Line::from(vec![
                     Span::styled("Plan: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!("{} steps", summary.plan_steps), self.theme.base_style()),
+                    Span::styled(
+                        format!("{} steps", summary.plan_steps),
+                        self.theme.base_style(),
+                    ),
                     Span::raw(" │ "),
                     Span::styled("Top risk: ", Style::default().fg(Color::DarkGray)),
                     Span::styled(top_risk, self.theme.accent_style()),
@@ -83,7 +90,10 @@ impl<'a> GraphSummaryPanel<'a> {
             ]
         } else {
             vec![
-                Line::from(Span::styled("Graph artifacts not loaded", self.theme.dimmed_style())),
+                Line::from(Span::styled(
+                    "Graph artifacts not loaded",
+                    self.theme.dimmed_style(),
+                )),
                 Line::from(Span::styled(
                     "Run `ch-migrate graph` to generate ./graph-artifacts",
                     self.theme.dimmed_style(),
@@ -100,7 +110,9 @@ impl Widget for &GraphSummaryPanel<'_> {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(Span::styled(
                 " Graph Summary ",
-                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);

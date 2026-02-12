@@ -115,7 +115,11 @@ impl MappingReason {
     /// Creates a new mapping reason.
     #[must_use]
     pub fn new(kind: MappingReasonKind, weight_bps: u16, details: impl Into<String>) -> Self {
-        Self { kind, weight_bps, details: details.into() }
+        Self {
+            kind,
+            weight_bps,
+            details: details.into(),
+        }
     }
 }
 
@@ -192,7 +196,11 @@ impl GraphDiff {
             }
         }
         counts.residuals = residual_legacy_usages.len();
-        Self { mappings, residual_legacy_usages, counts }
+        Self {
+            mappings,
+            residual_legacy_usages,
+            counts,
+        }
     }
 
     /// Returns `true` when both mappings and residuals are empty.

@@ -82,13 +82,17 @@ pub fn export_artifacts(
     let mut written = Vec::new();
 
     if matches!(format, GraphArtifactFormat::Json | GraphArtifactFormat::All) {
-        written.extend(write_json_artifacts(output_dir, generation, graph, diff, plan)?);
+        written.extend(write_json_artifacts(
+            output_dir, generation, graph, diff, plan,
+        )?);
     }
     if matches!(format, GraphArtifactFormat::Dot | GraphArtifactFormat::All) {
         written.extend(write_dot_artifact(output_dir, generation, graph)?);
     }
     if matches!(format, GraphArtifactFormat::Md | GraphArtifactFormat::All) {
-        written.extend(write_markdown_artifact(output_dir, generation, graph, diff, plan)?);
+        written.extend(write_markdown_artifact(
+            output_dir, generation, graph, diff, plan,
+        )?);
     }
 
     written.sort();
@@ -103,9 +107,13 @@ struct GenerationMetadata {
 
 impl GenerationMetadata {
     fn new(snapshot_mode: GraphArtifactSnapshotMode) -> Self {
-        let generated_unix_epoch_ms =
-            SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_millis());
-        Self { generated_unix_epoch_ms, snapshot_mode }
+        let generated_unix_epoch_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis());
+        Self {
+            generated_unix_epoch_ms,
+            snapshot_mode,
+        }
     }
 }
 
@@ -154,14 +162,18 @@ fn write_markdown_artifact(
 
 fn write_json_file(path: &Utf8Path, payload: &serde_json::Value) -> Result<(), ExportError> {
     let bytes = serde_json::to_vec_pretty(payload)?;
-    std::fs::write(path.as_std_path(), bytes)
-        .map_err(|source| ExportError::Write { path: path.to_path_buf(), source })?;
+    std::fs::write(path.as_std_path(), bytes).map_err(|source| ExportError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
     Ok(())
 }
 
 fn write_text_file(path: &Utf8Path, payload: &str) -> Result<(), ExportError> {
-    std::fs::write(path.as_std_path(), payload)
-        .map_err(|source| ExportError::Write { path: path.to_path_buf(), source })?;
+    std::fs::write(path.as_std_path(), payload).map_err(|source| ExportError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
     Ok(())
 }
 
@@ -303,7 +315,10 @@ fn collect_graph_nodes(graph: &DependencyGraph, include_details: bool) -> Vec<se
                         "source_classification".to_owned(),
                         json!(source_classification_label(node.source_classification)),
                     );
-                    map.insert("source".to_owned(), json!(node.source.map(model_source_label)));
+                    map.insert(
+                        "source".to_owned(),
+                        json!(node.source.map(model_source_label)),
+                    );
                     map.insert("canonical_id".to_owned(), json!(node.canonical_id));
                     map.insert("model_name".to_owned(), json!(node.model_name));
                     map.insert("symbol_name".to_owned(), json!(node.symbol_name));
@@ -411,9 +426,12 @@ fn collect_relation_evidence<'a>(
 fn collect_full_mappings(diff: &GraphDiff) -> Vec<serde_json::Value> {
     let mut mappings: Vec<_> = diff.mappings.iter().collect();
     mappings.sort_by(|left, right| {
-        left.legacy_canonical_id.cmp(&right.legacy_canonical_id).then_with(|| {
-            model_reference_key(&left.legacy_symbol).cmp(&model_reference_key(&right.legacy_symbol))
-        })
+        left.legacy_canonical_id
+            .cmp(&right.legacy_canonical_id)
+            .then_with(|| {
+                model_reference_key(&left.legacy_symbol)
+                    .cmp(&model_reference_key(&right.legacy_symbol))
+            })
     });
 
     mappings
@@ -575,7 +593,9 @@ fn collect_anchor_values<'a>(
 fn collect_minimal_plan_steps(plan: &MigrationPlan) -> Vec<serde_json::Value> {
     let mut steps: Vec<_> = plan.steps.iter().collect();
     steps.sort_by(|left, right| {
-        left.order.cmp(&right.order).then_with(|| left.step_id.cmp(&right.step_id))
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.step_id.cmp(&right.step_id))
     });
 
     steps
@@ -597,7 +617,9 @@ fn collect_minimal_plan_steps(plan: &MigrationPlan) -> Vec<serde_json::Value> {
 fn collect_full_plan_steps(plan: &MigrationPlan) -> Vec<serde_json::Value> {
     let mut steps: Vec<_> = plan.steps.iter().collect();
     steps.sort_by(|left, right| {
-        left.order.cmp(&right.order).then_with(|| left.step_id.cmp(&right.step_id))
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.step_id.cmp(&right.step_id))
     });
 
     steps
@@ -715,24 +737,37 @@ fn render_graph_dot(generation: GenerationMetadata, graph: &DependencyGraph) -> 
 
     let counts = &graph.metadata().counts;
     let mut output = String::new();
-    let _ = writeln!(output, "// generated_unix_epoch_ms: {}", generation.generated_unix_epoch_ms);
-    let _ = writeln!(output, "// snapshot_mode: {}", snapshot_mode_label(generation.snapshot_mode));
+    let _ = writeln!(
+        output,
+        "// generated_unix_epoch_ms: {}",
+        generation.generated_unix_epoch_ms
+    );
+    let _ = writeln!(
+        output,
+        "// snapshot_mode: {}",
+        snapshot_mode_label(generation.snapshot_mode)
+    );
     let _ = writeln!(output, "// total_nodes: {}", counts.total_nodes);
     let _ = writeln!(output, "// total_edges: {}", counts.total_edges);
     let _ = writeln!(output, "digraph dependency_graph {{");
     let _ = writeln!(output, "  rankdir=LR;");
 
-    for node in
-        collect_graph_nodes(graph, generation.snapshot_mode == GraphArtifactSnapshotMode::Full)
-    {
+    for node in collect_graph_nodes(
+        graph,
+        generation.snapshot_mode == GraphArtifactSnapshotMode::Full,
+    ) {
         let node_id = value_string(&node, "node_id");
         let label = if generation.snapshot_mode == GraphArtifactSnapshotMode::Full {
             format!("{node_id}\\n{}", value_string(&node, "kind"))
         } else {
             node_id.clone()
         };
-        let _ =
-            writeln!(output, "  \"{}\" [label=\"{}\"];", dot_escape(&node_id), dot_escape(&label));
+        let _ = writeln!(
+            output,
+            "  \"{}\" [label=\"{}\"];",
+            dot_escape(&node_id),
+            dot_escape(&label)
+        );
     }
 
     for edge in collect_graph_edges(graph, GraphArtifactSnapshotMode::Minimal) {
@@ -763,18 +798,35 @@ fn render_plan_markdown(
     let mut output = String::new();
     let _ = writeln!(output, "# Migration Plan");
     let _ = writeln!(output);
-    let _ = writeln!(output, "- Generated unix epoch ms: `{}`", generation.generated_unix_epoch_ms);
-    let _ =
-        writeln!(output, "- Snapshot mode: `{}`", snapshot_mode_label(generation.snapshot_mode));
+    let _ = writeln!(
+        output,
+        "- Generated unix epoch ms: `{}`",
+        generation.generated_unix_epoch_ms
+    );
+    let _ = writeln!(
+        output,
+        "- Snapshot mode: `{}`",
+        snapshot_mode_label(generation.snapshot_mode)
+    );
     let _ = writeln!(
         output,
         "- Parser version: `{}`",
-        graph.metadata().parser_metadata.parser_version.as_deref().unwrap_or("unknown")
+        graph
+            .metadata()
+            .parser_metadata
+            .parser_version
+            .as_deref()
+            .unwrap_or("unknown")
     );
     let _ = writeln!(
         output,
         "- Relation query version: `{}`",
-        graph.metadata().parser_metadata.relation_query_version.as_deref().unwrap_or("unknown")
+        graph
+            .metadata()
+            .parser_metadata
+            .relation_query_version
+            .as_deref()
+            .unwrap_or("unknown")
     );
     let _ = writeln!(
         output,
@@ -787,22 +839,48 @@ fn render_plan_markdown(
             .collect::<Vec<_>>()
             .join(", ")
     );
-    let _ = writeln!(output, "- Total graph nodes: `{}`", graph.metadata().counts.total_nodes);
-    let _ = writeln!(output, "- Total graph edges: `{}`", graph.metadata().counts.total_edges);
+    let _ = writeln!(
+        output,
+        "- Total graph nodes: `{}`",
+        graph.metadata().counts.total_nodes
+    );
+    let _ = writeln!(
+        output,
+        "- Total graph edges: `{}`",
+        graph.metadata().counts.total_edges
+    );
     let _ = writeln!(output, "- Mappings matched: `{}`", diff.counts.matched);
-    let _ = writeln!(output, "- Mappings low-confidence: `{}`", diff.counts.low_confidence);
+    let _ = writeln!(
+        output,
+        "- Mappings low-confidence: `{}`",
+        diff.counts.low_confidence
+    );
     let _ = writeln!(output, "- Mappings no-match: `{}`", diff.counts.no_match);
-    let _ = writeln!(output, "- Residual legacy usages: `{}`", diff.counts.residuals);
-    let _ = writeln!(output, "- Total components: `{}`", plan.counts.total_components);
+    let _ = writeln!(
+        output,
+        "- Residual legacy usages: `{}`",
+        diff.counts.residuals
+    );
+    let _ = writeln!(
+        output,
+        "- Total components: `{}`",
+        plan.counts.total_components
+    );
     let _ = writeln!(output, "- Emitted steps: `{}`", plan.counts.emitted_steps);
-    let _ = writeln!(output, "- Truncated components: `{}`", plan.counts.truncated_components);
+    let _ = writeln!(
+        output,
+        "- Truncated components: `{}`",
+        plan.counts.truncated_components
+    );
     let _ = writeln!(output);
     let _ = writeln!(output, "| Step | Order | Prerequisites | Risk (bps) |");
     let _ = writeln!(output, "| --- | --- | --- | --- |");
 
     let mut steps: Vec<_> = plan.steps.iter().collect();
     steps.sort_by(|left, right| {
-        left.order.cmp(&right.order).then_with(|| left.step_id.cmp(&right.step_id))
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.step_id.cmp(&right.step_id))
     });
     for step in steps {
         let prerequisites = if step.prerequisites.is_empty() {
@@ -883,7 +961,11 @@ fn dot_escape(value: &str) -> String {
 }
 
 fn value_string(value: &serde_json::Value, key: &str) -> String {
-    value.get(key).and_then(serde_json::Value::as_str).map(ToOwned::to_owned).unwrap_or_default()
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_default()
 }
 
 fn value_usize(value: &serde_json::Value, key: &str) -> usize {
@@ -1041,8 +1123,10 @@ mod tests {
         assert!(export_result.is_ok());
 
         if let Ok(written) = export_result {
-            let mut names: Vec<_> =
-                written.iter().filter_map(|path| path.file_name().map(ToOwned::to_owned)).collect();
+            let mut names: Vec<_> = written
+                .iter()
+                .filter_map(|path| path.file_name().map(ToOwned::to_owned))
+                .collect();
             names.sort();
             assert_eq!(
                 names,
@@ -1182,7 +1266,10 @@ mod tests {
         assert!(first_markdown.is_ok());
         assert!(second_markdown.is_ok());
         if let (Ok(first_markdown), Ok(second_markdown)) = (first_markdown, second_markdown) {
-            assert_eq!(normalize_markdown(&first_markdown), normalize_markdown(&second_markdown));
+            assert_eq!(
+                normalize_markdown(&first_markdown),
+                normalize_markdown(&second_markdown)
+            );
         }
 
         let _ = std::fs::remove_dir_all(first_dir.as_std_path());
@@ -1204,8 +1291,16 @@ mod tests {
 
         let mut relation = AstRelationEvidence::new(
             EdgeKind::ImportsSymbol,
-            ModelReference::new("OrderModel", ModelCategory::Model, ModelSource::SharedLegacy),
-            ModelReference::new("OrderModel", ModelCategory::Model, ModelSource::SharedLegacy),
+            ModelReference::new(
+                "OrderModel",
+                ModelCategory::Model,
+                ModelSource::SharedLegacy,
+            ),
+            ModelReference::new(
+                "OrderModel",
+                ModelCategory::Model,
+                ModelSource::SharedLegacy,
+            ),
         );
         relation.add_anchor(sample_anchor("app/features/order-consumer.ts", 101));
         graph.add_edge(
@@ -1223,7 +1318,10 @@ mod tests {
                 service_nodes: 0,
                 file_nodes: 1,
                 symbol_nodes: 1,
-                edges_by_kind: vec![GraphEdgeKindCount { kind: EdgeKind::ImportsSymbol, count: 1 }],
+                edges_by_kind: vec![GraphEdgeKindCount {
+                    kind: EdgeKind::ImportsSymbol,
+                    count: 1,
+                }],
             },
             source_roots: vec![
                 Utf8PathBuf::from("app"),
@@ -1342,8 +1440,9 @@ mod tests {
     }
 
     fn temp_export_dir(suffix: &str) -> Utf8PathBuf {
-        let nanos =
-            SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
         let raw = std::env::temp_dir().join(format!("ch-graph-export-{suffix}-{nanos}"));
         Utf8PathBuf::from_str(raw.to_string_lossy().as_ref())
             .unwrap_or_else(|_| Utf8PathBuf::from(format!("/tmp/ch-graph-export-{suffix}-{nanos}")))

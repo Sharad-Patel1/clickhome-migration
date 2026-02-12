@@ -24,7 +24,11 @@ impl<'a> ModelListView<'a> {
     /// Creates a new model list view.
     #[must_use]
     pub const fn new(nodes: &'a [GraphNodeSummary], focused: bool, theme: &'a Theme) -> Self {
-        Self { nodes, focused, theme }
+        Self {
+            nodes,
+            focused,
+            theme,
+        }
     }
 
     fn build_rows(&self, state: &FileListState) -> Vec<Row<'a>> {
@@ -32,7 +36,10 @@ impl<'a> ModelListView<'a> {
         let node_indices: Vec<usize> =
             indices.map_or_else(|| (0..self.nodes.len()).collect(), <[usize]>::to_vec);
 
-        node_indices.into_iter().map(|idx| self.build_row(&self.nodes[idx])).collect()
+        node_indices
+            .into_iter()
+            .map(|idx| self.build_row(&self.nodes[idx]))
+            .collect()
     }
 
     fn build_row(&self, node: &GraphNodeSummary) -> Row<'a> {
@@ -57,8 +64,11 @@ impl StatefulWidget for &ModelListView<'_> {
         let inner_height = area.height.saturating_sub(2);
         state.visible_height = inner_height as usize;
 
-        let border_style =
-            if self.focused { self.theme.focused_border_style } else { self.theme.border_style };
+        let border_style = if self.focused {
+            self.theme.focused_border_style
+        } else {
+            self.theme.border_style
+        };
 
         let title = format!(" Models ({}) ", self.nodes.len());
         let block = Block::default()
@@ -67,7 +77,11 @@ impl StatefulWidget for &ModelListView<'_> {
             .title(Span::styled(title, self.theme.header_style));
 
         let rows = self.build_rows(state);
-        let widths = [Constraint::Min(24), Constraint::Length(14), Constraint::Length(12)];
+        let widths = [
+            Constraint::Min(24),
+            Constraint::Length(14),
+            Constraint::Length(12),
+        ];
 
         let table = Table::new(rows, widths)
             .block(block)
@@ -103,14 +117,22 @@ impl<'a> ModelDrilldown<'a> {
         focused: bool,
         theme: &'a Theme,
     ) -> Self {
-        Self { artifacts, selected, focused, theme }
+        Self {
+            artifacts,
+            selected,
+            focused,
+            theme,
+        }
     }
 
     fn build_lines(&self) -> Vec<Line<'a>> {
         let Some(artifacts) = self.artifacts else {
             return vec![
                 Line::from(""),
-                Line::from(Span::styled("Graph artifacts not loaded", self.theme.dimmed_style())),
+                Line::from(Span::styled(
+                    "Graph artifacts not loaded",
+                    self.theme.dimmed_style(),
+                )),
                 Line::from(Span::styled(
                     "Run `ch-migrate graph` to generate ./graph-artifacts",
                     self.theme.dimmed_style(),
@@ -134,7 +156,9 @@ impl<'a> ModelDrilldown<'a> {
             Span::styled("Model: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 node.display_name.clone(),
-                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
 
@@ -191,8 +215,11 @@ impl StatefulWidget for &ModelDrilldown<'_> {
     type State = GraphDrilldownState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let border_style =
-            if self.focused { self.theme.focused_border_style } else { self.theme.border_style };
+        let border_style = if self.focused {
+            self.theme.focused_border_style
+        } else {
+            self.theme.border_style
+        };
 
         let block = Block::default()
             .borders(Borders::ALL)
@@ -213,8 +240,9 @@ impl StatefulWidget for &ModelDrilldown<'_> {
         let scroll_offset = state.scroll_offset as u16;
 
         let content = Text::from(lines);
-        let paragraph =
-            Paragraph::new(content).scroll((scroll_offset, 0)).wrap(Wrap { trim: false });
+        let paragraph = Paragraph::new(content)
+            .scroll((scroll_offset, 0))
+            .wrap(Wrap { trim: false });
         paragraph.render(inner, buf);
 
         if total_lines > inner.height as usize {
@@ -228,7 +256,10 @@ impl StatefulWidget for &ModelDrilldown<'_> {
                 .viewport_content_length(inner.height as usize);
 
             scrollbar.render(
-                inner.inner(ratatui::layout::Margin { vertical: 1, horizontal: 0 }),
+                inner.inner(ratatui::layout::Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
                 buf,
                 &mut scrollbar_state,
             );
@@ -244,7 +275,10 @@ fn append_edge_preview<'a>(
     theme: &'a Theme,
 ) {
     if edges.is_empty() {
-        lines.push(Line::from(Span::styled(format!("{label}: none"), theme.dimmed_style())));
+        lines.push(Line::from(Span::styled(
+            format!("{label}: none"),
+            theme.dimmed_style(),
+        )));
         return;
     }
 
@@ -287,7 +321,10 @@ fn append_evidence_section<'a>(
 
     evidence_edges.truncate(3);
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("── Evidence ──", Style::default().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled(
+        "── Evidence ──",
+        Style::default().fg(Color::DarkGray),
+    )));
 
     for edge in evidence_edges {
         lines.push(Line::from(vec![
@@ -311,7 +348,10 @@ fn append_evidence_section<'a>(
                         Span::raw(":"),
                         Span::styled(anchor.start.column.to_string(), theme.base_style()),
                         Span::raw(" "),
-                        Span::styled(format!("hash {}", anchor.snippet_hash), theme.dimmed_style()),
+                        Span::styled(
+                            format!("hash {}", anchor.snippet_hash),
+                            theme.dimmed_style(),
+                        ),
                     ]));
                 }
             }
@@ -339,8 +379,10 @@ fn append_plan_context<'a>(
     theme: &'a Theme,
 ) {
     lines.push(Line::from(""));
-    lines
-        .push(Line::from(Span::styled("── Plan Context ──", Style::default().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled(
+        "── Plan Context ──",
+        Style::default().fg(Color::DarkGray),
+    )));
 
     if !artifacts.plan_has_node_ids {
         lines.push(Line::from(Span::styled(
@@ -364,7 +406,10 @@ fn append_plan_context<'a>(
             Span::styled("Step: ", Style::default().fg(Color::DarkGray)),
             Span::styled(step.step_id.clone(), theme.base_style()),
             Span::raw(" │ "),
-            Span::styled(format!("order {}", step.order), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("order {}", step.order),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::raw(" │ "),
             Span::styled(
                 format!("risk {} bps", step.risk_score_bps),
@@ -410,7 +455,10 @@ fn truncate_text(text: &str, max_width: usize) -> String {
     let ellipsis = "...";
     let available = max_width.saturating_sub(ellipsis.len());
     if available < 8 {
-        return format!("{ellipsis}{}", &text[text.len().saturating_sub(available)..]);
+        return format!(
+            "{ellipsis}{}",
+            &text[text.len().saturating_sub(available)..]
+        );
     }
     format!("{ellipsis}{}", &text[text.len() - available..])
 }

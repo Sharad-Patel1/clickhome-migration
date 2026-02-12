@@ -21,7 +21,7 @@ use crate::queries::{
     CAPTURE_RELATION_SERVICE_PARAM, CAPTURE_RELATION_SERVICE_RETURN,
     CAPTURE_RELATION_TYPE_REF_FIELD, CAPTURE_RELATION_TYPE_REF_PROPERTY,
 };
-use crate::source::{ModelPathMatcher, detect_model_source_with};
+use crate::source::{detect_model_source_with, ModelPathMatcher};
 
 const UNKNOWN_FILE_PATH: &str = "<unknown>";
 
@@ -242,8 +242,20 @@ fn add_contextual_relation(
     };
 
     let is_type_only = type_only_context || target.is_type_only_import;
-    let anchor = build_anchor(target_node, context.source_bytes, is_type_only, target.import_kind);
-    upsert_relation(relations, relation_index, relation, source_model, target.model, anchor);
+    let anchor = build_anchor(
+        target_node,
+        context.source_bytes,
+        is_type_only,
+        target.import_kind,
+    );
+    upsert_relation(
+        relations,
+        relation_index,
+        relation,
+        source_model,
+        target.model,
+        anchor,
+    );
 }
 
 fn add_call_relation(
@@ -350,8 +362,11 @@ fn build_import_bindings(
             match clause_child.kind() {
                 "identifier" => {
                     if let Some(local_name) = node_text(clause_child, source_bytes) {
-                        let import_kind =
-                            if is_type_only { ImportKind::TypeOnly } else { ImportKind::Default };
+                        let import_kind = if is_type_only {
+                            ImportKind::TypeOnly
+                        } else {
+                            ImportKind::Default
+                        };
                         insert_binding(
                             &mut bindings,
                             local_name,
@@ -412,8 +427,11 @@ fn build_import_bindings(
                             .and_then(|alias| node_text(alias, source_bytes))
                             .unwrap_or(canonical_name);
 
-                        let import_kind =
-                            if is_type_only { ImportKind::TypeOnly } else { ImportKind::Named };
+                        let import_kind = if is_type_only {
+                            ImportKind::TypeOnly
+                        } else {
+                            ImportKind::Named
+                        };
                         insert_binding(
                             &mut bindings,
                             local_name,
@@ -494,7 +512,12 @@ fn resolve_source_model(
             "class_declaration" | "interface_declaration" | "type_alias_declaration" => cursor_node
                 .child_by_field_name("name")
                 .and_then(|name_node| node_text(name_node, source_bytes))
-                .and_then(|name| local_models.get(name).copied().map(|category| (name, category))),
+                .and_then(|name| {
+                    local_models
+                        .get(name)
+                        .copied()
+                        .map(|category| (name, category))
+                }),
             _ => None,
         };
 
@@ -710,7 +733,8 @@ fn field_name_for_node(node: Node<'_>) -> Option<&'static str> {
 
 fn child_by_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
-    node.named_children(&mut cursor).find(|child| child.kind() == kind)
+    node.named_children(&mut cursor)
+        .find(|child| child.kind() == kind)
 }
 
 fn node_text<'a>(node: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
@@ -813,7 +837,9 @@ fn is_model_map_object(node: Node<'_>, source_bytes: &[u8]) -> bool {
 }
 
 fn looks_model_identifier(name: &str) -> bool {
-    name.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
+    name.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
 }
 
 fn is_ignored_type_name(name: &str) -> bool {
@@ -864,19 +890,23 @@ mod tests {
     use super::*;
     use tree_sitter::{Language, Parser, Query};
 
-    use crate::queries::{RELATION_QUERY, get_tsx_relation_query, get_typescript_relation_query};
+    use crate::queries::{get_tsx_relation_query, get_typescript_relation_query, RELATION_QUERY};
 
     fn create_parser() -> Parser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-        parser.set_language(&language).expect("Failed to set TypeScript language");
+        parser
+            .set_language(&language)
+            .expect("Failed to set TypeScript language");
         parser
     }
 
     fn create_tsx_parser() -> Parser {
         let mut parser = Parser::new();
         let language: Language = tree_sitter_typescript::LANGUAGE_TSX.into();
-        parser.set_language(&language).expect("Failed to set TSX language");
+        parser
+            .set_language(&language)
+            .expect("Failed to set TSX language");
         parser
     }
 
@@ -926,10 +956,14 @@ export class OrderModel extends BaseModel implements Trackable {
             extract_model_relations(&tree, source, &query, &ModelPathMatcher::default(), None);
 
         assert_eq!(relations.len(), 2);
-        assert!(relations.iter().any(|relation| relation.relation == EdgeKind::Extends
-            && relation.target.name == "BaseModel"));
-        assert!(relations.iter().any(|relation| relation.relation == EdgeKind::Implements
-            && relation.target.name == "Trackable"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation == EdgeKind::Extends
+                && relation.target.name == "BaseModel"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation == EdgeKind::Implements
+                && relation.target.name == "Trackable"));
     }
 
     #[test]
@@ -958,10 +992,14 @@ class OrderService {
         let relations =
             extract_model_relations(&tree, source, &query, &ModelPathMatcher::default(), None);
 
-        assert!(relations.iter().any(|relation| relation.relation == EdgeKind::Constructs
-            && relation.target.name == "OrderModel"));
-        let factory_count =
-            relations.iter().filter(|relation| relation.relation == EdgeKind::FactoryCall).count();
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation == EdgeKind::Constructs
+                && relation.target.name == "OrderModel"));
+        let factory_count = relations
+            .iter()
+            .filter(|relation| relation.relation == EdgeKind::FactoryCall)
+            .count();
         assert_eq!(factory_count, 2);
     }
 
@@ -1026,10 +1064,14 @@ class DashboardModel {
         let relations =
             extract_model_relations(&tree, source, query, &ModelPathMatcher::default(), None);
 
-        assert!(relations.iter().any(|relation| relation.relation == EdgeKind::Constructs
-            && relation.target.name == "UiModel"));
-        assert!(relations.iter().any(|relation| relation.relation == EdgeKind::FactoryCall
-            && relation.target.name == "UiModel"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation == EdgeKind::Constructs
+                && relation.target.name == "UiModel"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation == EdgeKind::FactoryCall
+                && relation.target.name == "UiModel"));
     }
 
     #[test]

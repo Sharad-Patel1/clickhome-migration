@@ -378,7 +378,10 @@ impl Scanner {
     ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {}", config.root)));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
         }
 
         if !config.root.is_dir() {
@@ -446,7 +449,10 @@ impl Scanner {
     ) -> Result<Self, ScanError> {
         // Validate configuration
         if !config.root.exists() {
-            return Err(ScanError::config(format!("root path does not exist: {}", config.root)));
+            return Err(ScanError::config(format!(
+                "root path does not exist: {}",
+                config.root
+            )));
         }
 
         if !config.root.is_dir() {
@@ -509,8 +515,11 @@ impl Scanner {
         self.prune_cache_to_paths(&paths);
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         // Analyze files in parallel
         let results = FileAnalyzer::analyze_files_with_cache(
@@ -539,7 +548,8 @@ impl Scanner {
                     }
 
                     if outcome.source == AnalysisSource::Parsed {
-                        self.cache.insert_with_key(file_info.clone(), outcome.cache_key);
+                        self.cache
+                            .insert_with_key(file_info.clone(), outcome.cache_key);
                     }
 
                     debug!(
@@ -632,14 +642,20 @@ impl Scanner {
         self.prune_cache_to_paths(&paths);
 
         // Send paths discovered notification
-        if tx.blocking_send(ScanUpdate::PathsDiscovered(path_count)).is_err() {
+        if tx
+            .blocking_send(ScanUpdate::PathsDiscovered(path_count))
+            .is_err()
+        {
             // Receiver dropped, return early
             return Ok(());
         }
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         // Analyze files in parallel, streaming results
         let analyzer = FileAnalyzer::new();
@@ -697,8 +713,11 @@ impl Scanner {
         debug!(count = paths.len(), "Re-scanning files");
 
         // Determine registry reference for filtering
-        let registry_ref =
-            if self.config.use_registry { Some(self.registry.as_ref()) } else { None };
+        let registry_ref = if self.config.use_registry {
+            Some(self.registry.as_ref())
+        } else {
+            None
+        };
 
         let results = FileAnalyzer::analyze_files_with_cache(
             paths,
@@ -869,8 +888,11 @@ impl Scanner {
 
     fn prune_cache_to_paths(&self, paths: &[Utf8PathBuf]) {
         let live_paths: FxHashSet<Utf8PathBuf> = paths.iter().cloned().collect();
-        for stale_path in
-            self.cache.all_paths().into_iter().filter(|path| !live_paths.contains(path))
+        for stale_path in self
+            .cache
+            .all_paths()
+            .into_iter()
+            .filter(|path| !live_paths.contains(path))
         {
             let _ = self.cache.remove(&stale_path);
         }
@@ -911,12 +933,17 @@ mod tests {
 
     #[test]
     fn test_scan_config_with_shared_paths() {
-        let config = ScanConfig::new(Utf8Path::new("./src"))
-            .with_shared_paths(Utf8Path::new("./src/shared"), Utf8Path::new("./src/shared_2023"));
+        let config = ScanConfig::new(Utf8Path::new("./src")).with_shared_paths(
+            Utf8Path::new("./src/shared"),
+            Utf8Path::new("./src/shared_2023"),
+        );
 
         assert!(config.use_registry);
         assert_eq!(config.shared_path, Some(Utf8PathBuf::from("./src/shared")));
-        assert_eq!(config.shared_2023_path, Some(Utf8PathBuf::from("./src/shared_2023")));
+        assert_eq!(
+            config.shared_2023_path,
+            Some(Utf8PathBuf::from("./src/shared_2023"))
+        );
     }
 
     #[test]
@@ -1045,8 +1072,9 @@ mod tests {
     }
 
     fn create_temp_root(suffix: &str) -> Utf8PathBuf {
-        let nanos =
-            SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
         let root_std = std::env::temp_dir().join(format!("ch-scanner-tests-{suffix}-{nanos}"));
         let utf8 = Utf8PathBuf::from_path_buf(root_std);
         assert!(utf8.is_ok());

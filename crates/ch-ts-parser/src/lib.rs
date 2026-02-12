@@ -180,7 +180,7 @@ pub mod source;
 // Re-export main types for convenient access
 pub use error::ParseError;
 pub use parser::{ArenaParser, BumpParseResult, ParseResult, TsParser};
-pub use source::{ModelPathMatcher, detect_model_source, detect_model_source_with};
+pub use source::{detect_model_source, detect_model_source_with, ModelPathMatcher};
 
 // Re-export arena types for ch-scanner integration
 pub use arena::{ArenaStr, BumpImportBuilder, BumpImportInfo, StringInterner};
@@ -193,8 +193,8 @@ pub use relations::extract_model_relations;
 
 // Re-export export extraction functions and types
 pub use exports::{
-    BumpExportInfo, ExportInfo, extract_exports, extract_exports_arena, get_tsx_export_query,
-    get_typescript_export_query, kebab_to_pascal, pascal_to_kebab,
+    extract_exports, extract_exports_arena, get_tsx_export_query, get_typescript_export_query,
+    kebab_to_pascal, pascal_to_kebab, BumpExportInfo, ExportInfo,
 };
 
 // Re-export tree-sitter types that appear in our public API
@@ -230,7 +230,9 @@ pub fn relation_query_hash() -> u64 {
 #[must_use]
 pub fn relation_query_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
-    VERSION.get_or_init(|| format!("relation-query/{:016x}", relation_query_hash())).as_str()
+    VERSION
+        .get_or_init(|| format!("relation-query/{:016x}", relation_query_hash()))
+        .as_str()
 }
 
 /// Returns a combined query fingerprint covering import and relation queries.

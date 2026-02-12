@@ -18,7 +18,7 @@ use petgraph::visit::EdgeRef;
 use smallvec::SmallVec;
 
 use crate::graph::{DependencyGraph, GraphNode, GraphNodeKind};
-use crate::mapping::{GraphDiff, MAX_CONFIDENCE_BPS, MappingStatus};
+use crate::mapping::{GraphDiff, MappingStatus, MAX_CONFIDENCE_BPS};
 
 /// Maximum risk score represented in basis points (`1000 == 100%`).
 pub const MAX_RISK_BPS: u16 = MAX_CONFIDENCE_BPS;
@@ -284,8 +284,11 @@ impl SymbolNodeData {
         let symbol_name = node.symbol_name.as_ref()?;
         let symbol_ref = ModelReference::new(symbol_name.clone(), category, source);
 
-        let legacy_canonical_id_hint =
-            if source.is_legacy() { Some(pascal_to_kebab(symbol_stem(symbol_name))) } else { None };
+        let legacy_canonical_id_hint = if source.is_legacy() {
+            Some(pascal_to_kebab(symbol_stem(symbol_name)))
+        } else {
+            None
+        };
 
         Some(Self {
             original_index,
@@ -403,8 +406,11 @@ fn build_components(symbol_graph: &DiGraph<SymbolNodeData, (), u32>) -> Vec<Comp
 
             let mut members = members;
             members.sort_by(|left, right| left.node_id.cmp(&right.node_id));
-            let component_key =
-                members.iter().map(|node| node.node_id.as_str()).collect::<Vec<_>>().join("|");
+            let component_key = members
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>()
+                .join("|");
             Some((node_index, members, component_key))
         })
         .collect();
@@ -504,10 +510,12 @@ fn populate_component_evidence_and_metrics(
     graph: &DependencyGraph,
     node_to_component: &FxHashMap<NodeIndex<u32>, usize>,
 ) {
-    let mut evidence_seen: Vec<FxHashSet<EvidenceSignature>> =
-        (0..components.len()).map(|_| FxHashSet::default()).collect();
-    let mut impacted_file_sets: Vec<FxHashSet<Utf8PathBuf>> =
-        (0..components.len()).map(|_| FxHashSet::default()).collect();
+    let mut evidence_seen: Vec<FxHashSet<EvidenceSignature>> = (0..components.len())
+        .map(|_| FxHashSet::default())
+        .collect();
+    let mut impacted_file_sets: Vec<FxHashSet<Utf8PathBuf>> = (0..components.len())
+        .map(|_| FxHashSet::default())
+        .collect();
 
     for edge_index in graph.graph().edge_indices() {
         let Some((source_index, target_index)) = graph.graph().edge_endpoints(edge_index) else {
@@ -588,8 +596,9 @@ fn populate_component_diff_signals(components: &mut [ComponentData], diff: &Grap
     let mut unresolved_symbols: FxHashSet<SymbolSignature> = FxHashSet::default();
     let mut residual_counts: FxHashMap<SymbolSignature, usize> = FxHashMap::default();
 
-    let mut replacement_sets: Vec<FxHashSet<ReplacementSignature>> =
-        (0..components.len()).map(|_| FxHashSet::default()).collect();
+    let mut replacement_sets: Vec<FxHashSet<ReplacementSignature>> = (0..components.len())
+        .map(|_| FxHashSet::default())
+        .collect();
     let mut impacted_file_sets: Vec<FxHashSet<Utf8PathBuf>> = components
         .iter()
         .map(|component| component.impacted_files.iter().cloned().collect())
@@ -613,14 +622,18 @@ fn populate_component_diff_signals(components: &mut [ComponentData], diff: &Grap
         };
 
         let modern_signature = SymbolSignature::from_model_reference(modern_symbol);
-        let replacement_signature =
-            ReplacementSignature { legacy: legacy_signature.clone(), modern: modern_signature };
+        let replacement_signature = ReplacementSignature {
+            legacy: legacy_signature.clone(),
+            modern: modern_signature,
+        };
         if replacement_sets[component_index].insert(replacement_signature) {
-            components[component_index].suggested_replacements.push(SuggestedReplacement {
-                legacy_symbol: mapping.legacy_symbol.clone(),
-                modern_symbol: modern_symbol.clone(),
-                confidence_bps: mapping.confidence_bps,
-            });
+            components[component_index]
+                .suggested_replacements
+                .push(SuggestedReplacement {
+                    legacy_symbol: mapping.legacy_symbol.clone(),
+                    modern_symbol: modern_symbol.clone(),
+                    confidence_bps: mapping.confidence_bps,
+                });
         }
     }
 
@@ -636,14 +649,18 @@ fn populate_component_diff_signals(components: &mut [ComponentData], diff: &Grap
 
         let modern_signature =
             SymbolSignature::from_model_reference(&residual.suggested_modern_symbol);
-        let replacement_signature =
-            ReplacementSignature { legacy: signature, modern: modern_signature };
+        let replacement_signature = ReplacementSignature {
+            legacy: signature,
+            modern: modern_signature,
+        };
         if replacement_sets[component_index].insert(replacement_signature) {
-            components[component_index].suggested_replacements.push(SuggestedReplacement {
-                legacy_symbol: residual.legacy_symbol.clone(),
-                modern_symbol: residual.suggested_modern_symbol.clone(),
-                confidence_bps: residual.confidence_bps,
-            });
+            components[component_index]
+                .suggested_replacements
+                .push(SuggestedReplacement {
+                    legacy_symbol: residual.legacy_symbol.clone(),
+                    modern_symbol: residual.suggested_modern_symbol.clone(),
+                    confidence_bps: residual.confidence_bps,
+                });
         }
     }
 
@@ -665,23 +682,30 @@ fn populate_component_diff_signals(components: &mut [ComponentData], diff: &Grap
         impacted_files.sort();
         component.impacted_files = impacted_files;
 
-        component.suggested_replacements.sort_by(compare_suggested_replacement);
+        component
+            .suggested_replacements
+            .sort_by(compare_suggested_replacement);
         component.suggested_replacements.dedup();
     }
 }
 
 fn score_component_risk(components: &mut [ComponentData], weights: PlannerRiskWeights) {
-    let maxima = components.iter().fold(SignalMaxima::default(), |mut maxima, component| {
-        maxima.downstream_fanout = maxima.downstream_fanout.max(component.downstream_fanout);
-        maxima.scc_size = maxima.scc_size.max(component.scc_size);
-        maxima.mixed_dependency_count =
-            maxima.mixed_dependency_count.max(component.mixed_dependency_count);
-        maxima.service_coupling_count =
-            maxima.service_coupling_count.max(component.service_coupling_count);
-        maxima.unresolved_mapping_count =
-            maxima.unresolved_mapping_count.max(component.unresolved_mapping_count);
-        maxima
-    });
+    let maxima = components
+        .iter()
+        .fold(SignalMaxima::default(), |mut maxima, component| {
+            maxima.downstream_fanout = maxima.downstream_fanout.max(component.downstream_fanout);
+            maxima.scc_size = maxima.scc_size.max(component.scc_size);
+            maxima.mixed_dependency_count = maxima
+                .mixed_dependency_count
+                .max(component.mixed_dependency_count);
+            maxima.service_coupling_count = maxima
+                .service_coupling_count
+                .max(component.service_coupling_count);
+            maxima.unresolved_mapping_count = maxima
+                .unresolved_mapping_count
+                .max(component.unresolved_mapping_count);
+            maxima
+        });
 
     for component in components {
         let downstream = component_score(
@@ -716,12 +740,13 @@ fn score_component_risk(components: &mut [ComponentData], weights: PlannerRiskWe
         );
 
         let mut breakdown = RiskBreakdown::default();
-        breakdown.components.extend([downstream, scc_size, mixed, service, unresolved]);
-
-        let total = breakdown
+        breakdown
             .components
-            .iter()
-            .fold(0_u32, |acc, score| acc.saturating_add(u32::from(score.weighted_bps)));
+            .extend([downstream, scc_size, mixed, service, unresolved]);
+
+        let total = breakdown.components.iter().fold(0_u32, |acc, score| {
+            acc.saturating_add(u32::from(score.weighted_bps))
+        });
         let bounded = total.min(u32::from(MAX_RISK_BPS));
         component.risk_score_bps = u16::try_from(bounded).ok().unwrap_or(MAX_RISK_BPS);
         component.risk_breakdown = breakdown;
@@ -755,8 +780,10 @@ fn normalize_signal(raw_value: usize, max_value: usize) -> u16 {
 }
 
 fn deterministic_topo_order(components: &[ComponentData]) -> Vec<usize> {
-    let mut indegree: Vec<usize> =
-        components.iter().map(|component| component.predecessors.len()).collect();
+    let mut indegree: Vec<usize> = components
+        .iter()
+        .map(|component| component.predecessors.len())
+        .collect();
     let mut frontier: Vec<usize> = indegree
         .iter()
         .enumerate()
@@ -780,8 +807,9 @@ fn deterministic_topo_order(components: &[ComponentData]) -> Vec<usize> {
     }
 
     if order.len() != components.len() {
-        let mut remaining: Vec<usize> =
-            (0..components.len()).filter(|index| !order.contains(index)).collect();
+        let mut remaining: Vec<usize> = (0..components.len())
+            .filter(|index| !order.contains(index))
+            .collect();
         remaining.sort_by(|left, right| compare_component_priority(components, *left, *right));
         order.extend(remaining);
     }
@@ -794,7 +822,11 @@ fn compare_component_priority(components: &[ComponentData], left: usize, right: 
         .risk_score_bps
         .cmp(&components[right].risk_score_bps)
         .then_with(|| components[left].scc_size.cmp(&components[right].scc_size))
-        .then_with(|| components[left].component_key.cmp(&components[right].component_key))
+        .then_with(|| {
+            components[left]
+                .component_key
+                .cmp(&components[right].component_key)
+        })
 }
 
 fn build_plan_steps(
@@ -803,13 +835,18 @@ fn build_plan_steps(
     max_steps: Option<usize>,
 ) -> MigrationPlan {
     let total_components = ordered_components.len();
-    let limit = max_steps.map_or(total_components, |max_steps| max_steps.min(total_components));
+    let limit = max_steps.map_or(total_components, |max_steps| {
+        max_steps.min(total_components)
+    });
     let truncated_components = total_components.saturating_sub(limit);
     let selected = &ordered_components[..limit];
 
     let mut step_ids: FxHashMap<usize, String> = FxHashMap::default();
     for (step_index, component_index) in selected.iter().enumerate() {
-        step_ids.insert(*component_index, format!("step-{index:04}", index = step_index + 1));
+        step_ids.insert(
+            *component_index,
+            format!("step-{index:04}", index = step_index + 1),
+        );
     }
 
     let mut steps = Vec::with_capacity(limit);
@@ -880,11 +917,17 @@ fn compare_model_reference(left: &ModelReference, right: &ModelReference) -> Ord
 }
 
 fn is_service_edge_kind(kind: EdgeKind) -> bool {
-    matches!(kind, EdgeKind::ServiceParamType | EdgeKind::ServiceReturnType)
+    matches!(
+        kind,
+        EdgeKind::ServiceParamType | EdgeKind::ServiceReturnType
+    )
 }
 
 fn is_service_category(category: Option<ModelCategory>) -> bool {
-    matches!(category, Some(ModelCategory::Service | ModelCategory::ServiceCodeGen))
+    matches!(
+        category,
+        Some(ModelCategory::Service | ModelCategory::ServiceCodeGen)
+    )
 }
 
 fn is_mixed_legacy_modern(source: SourceClassification, target: SourceClassification) -> bool {
@@ -964,7 +1007,7 @@ mod tests {
     use ch_core::{
         FileId, FileInfo, MigrationStatus, ModelDefinition, ModelRegistry, SourceLocation,
     };
-    use smallvec::{SmallVec, smallvec};
+    use smallvec::{smallvec, SmallVec};
 
     fn definition(
         name: &str,
@@ -1009,17 +1052,26 @@ mod tests {
     }
 
     fn cyclical_files() -> Vec<FileInfo> {
-        let legacy_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy);
+        let legacy_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
         let legacy_customer = ModelReference::new(
             "CustomerModel",
             ModelCategory::Interface,
             ModelSource::SharedLegacy,
         );
-        let modern_order =
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::Shared2023);
-        let modern_customer =
-            ModelReference::new("CustomerModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let modern_order = ModelReference::new(
+            "OrderModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
+        let modern_customer = ModelReference::new(
+            "CustomerModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
 
         let relation_a = relation(
             "src/cycle.ts",
@@ -1052,8 +1104,11 @@ mod tests {
 
         let mut first = FileInfo::new(FileId::new(1), Utf8PathBuf::from("src/cycle.ts"));
         first.status = MigrationStatus::Partial;
-        first.model_refs =
-            smallvec![legacy_order.clone(), modern_order.clone(), modern_customer.clone()];
+        first.model_refs = smallvec![
+            legacy_order.clone(),
+            modern_order.clone(),
+            modern_customer.clone()
+        ];
         first.relation_evidence = smallvec![relation_a, relation_c];
 
         let mut second = FileInfo::new(FileId::new(2), Utf8PathBuf::from("src/bridge.ts"));
@@ -1115,12 +1170,11 @@ mod tests {
         assert_eq!(plan.counts.total_components, plan.steps.len());
         assert!(!plan.is_empty());
         assert!(plan.steps.iter().any(|step| step.node_ids.len() >= 2));
-        assert!(
-            plan.steps
-                .iter()
-                .flat_map(|step| step.impacted_files.iter())
-                .any(|path| path.as_str() == "src/cycle.ts")
-        );
+        assert!(plan
+            .steps
+            .iter()
+            .flat_map(|step| step.impacted_files.iter())
+            .any(|path| path.as_str() == "src/cycle.ts"));
 
         for step in &plan.steps {
             for prerequisite in &step.prerequisites {
@@ -1187,11 +1241,16 @@ mod tests {
 
         for step in &plan.steps {
             assert_eq!(step.risk_breakdown.components.len(), 5);
-            let total = step.risk_breakdown.components.iter().fold(0_u32, |acc, component| {
-                acc.saturating_add(u32::from(component.weighted_bps))
-            });
-            let bounded_total =
-                u16::try_from(total.min(u32::from(MAX_RISK_BPS))).ok().unwrap_or(MAX_RISK_BPS);
+            let total = step
+                .risk_breakdown
+                .components
+                .iter()
+                .fold(0_u32, |acc, component| {
+                    acc.saturating_add(u32::from(component.weighted_bps))
+                });
+            let bounded_total = u16::try_from(total.min(u32::from(MAX_RISK_BPS)))
+                .ok()
+                .unwrap_or(MAX_RISK_BPS);
             assert_eq!(bounded_total, step.risk_score_bps);
         }
     }
@@ -1213,12 +1272,21 @@ mod tests {
         ));
         let inventory = build_inventory(&registry);
 
-        let foo =
-            ModelReference::new("FooModel", ModelCategory::Interface, ModelSource::SharedLegacy);
-        let bar =
-            ModelReference::new("BarModel", ModelCategory::Interface, ModelSource::SharedLegacy);
-        let modern_bar =
-            ModelReference::new("BarModel", ModelCategory::Interface, ModelSource::Shared2023);
+        let foo = ModelReference::new(
+            "FooModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
+        let bar = ModelReference::new(
+            "BarModel",
+            ModelCategory::Interface,
+            ModelSource::SharedLegacy,
+        );
+        let modern_bar = ModelReference::new(
+            "BarModel",
+            ModelCategory::Interface,
+            ModelSource::Shared2023,
+        );
 
         let mut file = FileInfo::new(FileId::new(3), Utf8PathBuf::from("src/isolated.ts"));
         file.status = MigrationStatus::Legacy;
@@ -1242,14 +1310,16 @@ mod tests {
         let plan = GraphPlanner::new().plan(&graph, &diff);
         assert_eq!(plan.steps.len(), 2);
 
-        let foo_position = plan
-            .steps
-            .iter()
-            .position(|step| step.node_ids.iter().any(|node_id| node_id.contains("FooModel")));
-        let bar_position = plan
-            .steps
-            .iter()
-            .position(|step| step.node_ids.iter().any(|node_id| node_id.contains("BarModel")));
+        let foo_position = plan.steps.iter().position(|step| {
+            step.node_ids
+                .iter()
+                .any(|node_id| node_id.contains("FooModel"))
+        });
+        let bar_position = plan.steps.iter().position(|step| {
+            step.node_ids
+                .iter()
+                .any(|node_id| node_id.contains("BarModel"))
+        });
 
         assert!(foo_position.is_some());
         assert!(bar_position.is_some());

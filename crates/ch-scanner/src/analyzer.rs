@@ -55,8 +55,8 @@ use ch_core::{
     ModelReference, ModelRegistry, ModelSource,
 };
 use ch_ts_parser::{
-    ArenaParser, ModelPathMatcher, detect_model_source_with, parser_version_hash,
-    query_version_hash,
+    detect_model_source_with, parser_version_hash, query_version_hash, ArenaParser,
+    ModelPathMatcher,
 };
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -64,10 +64,10 @@ use rustc_hash::{FxHashSet, FxHasher};
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
 
-use crate::ScanUpdate;
 use crate::cache::{AnalysisCacheKey, ScanCache};
 use crate::error::ScanError;
 use crate::stats::ScanStats;
+use crate::ScanUpdate;
 
 /// Origin of a file analysis result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,8 +331,10 @@ impl FileAnalyzer {
                         errors.lock().push((path.clone(), e.clone()));
 
                         // Send error update (ignore if receiver dropped)
-                        let _ = sender
-                            .blocking_send(ScanUpdate::FileError { path: path.clone(), error: e });
+                        let _ = sender.blocking_send(ScanUpdate::FileError {
+                            path: path.clone(),
+                            error: e,
+                        });
                     }
                 }
             },
@@ -370,8 +372,12 @@ impl FileAnalyzer {
         let arena = bumpalo::Bump::new();
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
 
-        let mut parser = if is_tsx { ArenaParser::new_tsx() } else { ArenaParser::new() }
-            .map_err(|e| ScanError::parse(path, e))?;
+        let mut parser = if is_tsx {
+            ArenaParser::new_tsx()
+        } else {
+            ArenaParser::new()
+        }
+        .map_err(|e| ScanError::parse(path, e))?;
 
         let context = AnalysisContext {
             ts_parser: Some(&mut parser),
@@ -396,12 +402,20 @@ impl FileAnalyzer {
         let cache_key = analysis_cache_key(content_hash);
 
         if let Some(file_info) = cache.get_if_fresh(path, cache_key) {
-            return Ok(AnalysisOutcome { file_info, cache_key, source: AnalysisSource::CacheHit });
+            return Ok(AnalysisOutcome {
+                file_info,
+                cache_key,
+                source: AnalysisSource::CacheHit,
+            });
         }
 
         let file_info = Self::analyze_contents_inner(path, &contents, content_hash, context)?;
 
-        Ok(AnalysisOutcome { file_info, cache_key, source: AnalysisSource::Parsed })
+        Ok(AnalysisOutcome {
+            file_info,
+            cache_key,
+            source: AnalysisSource::Parsed,
+        })
     }
 
     /// Internal file analysis implementation.
@@ -460,11 +474,17 @@ impl FileAnalyzer {
                 // If we have a registry, validate that at least one imported name
                 // is a known model export from the detected source
                 if let Some(reg) = context.registry {
-                    let has_model_export =
-                        import.names.iter().any(|name| reg.is_export_from(name, detected_source));
+                    let has_model_export = import
+                        .names
+                        .iter()
+                        .any(|name| reg.is_export_from(name, detected_source));
 
                     // Only mark as model import if it has actual model exports
-                    import.source = if has_model_export { Some(detected_source) } else { None };
+                    import.source = if has_model_export {
+                        Some(detected_source)
+                    } else {
+                        None
+                    };
                 } else {
                     // No registry - use path-based detection only
                     import.source = Some(detected_source);
@@ -478,8 +498,10 @@ impl FileAnalyzer {
         let model_refs = build_model_refs(&imports, &relation_evidence, context.registry);
 
         // Get current timestamp
-        let last_scanned =
-            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let last_scanned = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
         Ok(FileInfo {
             id: file_id,
@@ -537,7 +559,11 @@ fn model_ref_from_import_symbol(
         return None;
     }
 
-    Some(ModelReference::new(symbol, infer_model_category(symbol), source))
+    Some(ModelReference::new(
+        symbol,
+        infer_model_category(symbol),
+        source,
+    ))
 }
 
 /// Infers model category from canonical `ClickHome` symbol suffixes.
@@ -651,13 +677,19 @@ mod tests {
 
     #[test]
     fn test_determine_status_legacy() {
-        let imports = vec![make_import(Some(ModelSource::SharedLegacy)), make_import(None)];
+        let imports = vec![
+            make_import(Some(ModelSource::SharedLegacy)),
+            make_import(None),
+        ];
         assert_eq!(determine_status(&imports), MigrationStatus::Legacy);
     }
 
     #[test]
     fn test_determine_status_migrated() {
-        let imports = vec![make_import(Some(ModelSource::Shared2023)), make_import(None)];
+        let imports = vec![
+            make_import(Some(ModelSource::Shared2023)),
+            make_import(None),
+        ];
         assert_eq!(determine_status(&imports), MigrationStatus::Migrated);
     }
 
@@ -711,11 +743,23 @@ mod tests {
         assert_eq!(infer_model_category("Order"), ModelCategory::Model);
         assert_eq!(infer_model_category("OrderModel"), ModelCategory::Interface);
         assert_eq!(infer_model_category("OrderCodeGen"), ModelCategory::CodeGen);
-        assert_eq!(infer_model_category("OrderCodeGenForApi"), ModelCategory::CodeGenForApi);
-        assert_eq!(infer_model_category("OrderCodeGenForm"), ModelCategory::CodeGenForm);
-        assert_eq!(infer_model_category("OrderCodeGenFormArray"), ModelCategory::CodeGenFormArray);
+        assert_eq!(
+            infer_model_category("OrderCodeGenForApi"),
+            ModelCategory::CodeGenForApi
+        );
+        assert_eq!(
+            infer_model_category("OrderCodeGenForm"),
+            ModelCategory::CodeGenForm
+        );
+        assert_eq!(
+            infer_model_category("OrderCodeGenFormArray"),
+            ModelCategory::CodeGenFormArray
+        );
         assert_eq!(infer_model_category("OrderService"), ModelCategory::Service);
-        assert_eq!(infer_model_category("OrderServiceCodeGen"), ModelCategory::ServiceCodeGen);
+        assert_eq!(
+            infer_model_category("OrderServiceCodeGen"),
+            ModelCategory::ServiceCodeGen
+        );
     }
 
     #[test]
@@ -730,8 +774,16 @@ mod tests {
 
         let relations = [AstRelationEvidence::new(
             EdgeKind::Constructs,
-            ModelReference::new("CustomerModel", ModelCategory::Model, ModelSource::SharedLegacy),
-            ModelReference::new("OrderModel", ModelCategory::Interface, ModelSource::SharedLegacy),
+            ModelReference::new(
+                "CustomerModel",
+                ModelCategory::Model,
+                ModelSource::SharedLegacy,
+            ),
+            ModelReference::new(
+                "OrderModel",
+                ModelCategory::Interface,
+                ModelSource::SharedLegacy,
+            ),
         )];
 
         let model_refs = build_model_refs(&imports, &relations, None);
@@ -764,7 +816,10 @@ class CustomerModel {
 
         assert_eq!(file.status, MigrationStatus::Legacy);
         assert!(!file.model_refs.is_empty());
-        assert!(file.model_refs.iter().any(|model| model.name == "OrderModel"));
+        assert!(file
+            .model_refs
+            .iter()
+            .any(|model| model.name == "OrderModel"));
         assert!(!file.relation_evidence.is_empty());
 
         let _ = fs::remove_file(file_path.as_std_path());
