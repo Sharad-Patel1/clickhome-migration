@@ -4,7 +4,7 @@
 
 - Status: Running
 - Iteration: 6
-- Last Updated (UTC): 2026-02-12T00:59:56Z
+- Last Updated (UTC): 2026-02-12T01:00:42Z
 - Ordering Strategy: `topological-sort-by-blockedBy`
 - Current Branch: patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch
 - Current Workflow Step: Step 12/13 complete for QUA-125 (ready for next ticket iteration)
@@ -80,5 +80,5 @@
 
 - Branch: `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
 - Implementation commit: `ade0ba4`
-- Loop-state commit: `4c12138`
+- Loop-state commits: `4c12138`, `81b89fb`
 - Pushed: `origin/patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
