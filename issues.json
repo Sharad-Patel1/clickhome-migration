@@ -7,21 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 4,
-      "id": "9d60d204-14fd-41c6-8192-41757faf324d",
-      "identifier": "QUA-126",
-      "title": "Implement `ch-graph` dependency graph builder with typed nodes, edges, and provenance",
-      "url": "https://linear.app/quantumqores/issue/QUA-126/implement-ch-graph-dependency-graph-builder-with-typed-nodes-edges-and",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-125"
-      ],
-      "blocks": [
-        "QUA-127",
-        "QUA-129"
-      ]
-    },
-    {
       "sequence": 5,
       "id": "df03d9c6-b1d9-46fd-b334-a49cfc75dcf5",
       "identifier": "QUA-127",

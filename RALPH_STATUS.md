@@ -3,82 +3,88 @@
 ## Loop Metadata
 
 - Status: Running
-- Iteration: 6
-- Last Updated (UTC): 2026-02-12T01:00:42Z
+- Iteration: 7
+- Last Updated (UTC): 2026-02-12T01:32:15Z
 - Ordering Strategy: `topological-sort-by-blockedBy`
-- Current Branch: patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch
-- Current Workflow Step: Step 12/13 complete for QUA-125 (ready for next ticket iteration)
+- Current Branch: patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes
+- Current Workflow Step: Step 12/13 complete for QUA-126 (ready for next ticket iteration)
 - End Signal: `END_ITERATION`
 
 ## Ticket In Progress
 
-- Ticket: QUA-125
-- URL: https://linear.app/quantumqores/issue/QUA-125/populate-model-refs-and-relation-evidence-stream-in-ch-scanner
-- Branch: `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
-- Linear plan comment: `09c11e1a-1d5c-4234-865c-7659cb10cc44`
-- Linear completion comment: `6db10b57-9b79-4951-801a-e985cdf7540c`
+- Ticket: QUA-126
+- URL: https://linear.app/quantumqores/issue/QUA-126/implement-ch-graph-dependency-graph-builder-with-typed-nodes-edges-and
+- Branch: `patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes`
+- Linear plan comment: `ef1872c7-db4c-42d0-9c0a-47dac4d6564e`
+- Linear completion comment: `2f7179b2-3e57-460a-9f4b-2d4ea61033dc`
 - Linear status: Done
 
 ## Ordered Queue Snapshot
 
-- `orderedIssues`: [`QUA-126`, `QUA-127`, `QUA-128`, `QUA-129`, `QUA-130`, `QUA-131`, `QUA-132`, `QUA-133`]
+- `orderedIssues`: [`QUA-127`, `QUA-128`, `QUA-129`, `QUA-130`, `QUA-131`, `QUA-132`, `QUA-133`]
 
 ## Accomplished This Iteration
 
-1. Read loop state and selected queue head `QUA-125` from `issues.json`.
-2. Pulled full Linear ticket context (scope, blockers, acceptance criteria, comments).
-3. Verified blocker status: `QUA-123` and `QUA-124` were `Done`; ticket unblocked.
-4. Performed provenance research with Ref MCP + Exa MCP:
-   - tree-sitter query/threading semantics
-   - Rust `Vec::retain` / `HashSet::insert` behavior for deterministic dedup patterns
-5. Ran sequential-thinking analysis for scanner enrichment architecture and deterministic merge strategy.
+1. Read loop state from `RALPH_STATUS.md` and selected queue head `QUA-126` from `issues.json`.
+2. Pulled full Linear ticket context for `QUA-126` including dependency and acceptance criteria details.
+3. Verified blocker status: `QUA-125` is `Done`; ticket unblocked.
+4. Performed provenance research with Ref MCP + Exa MCP for:
+   - `petgraph::stable_graph::StableGraph` semantics and index stability
+   - deterministic ordering constraints and relation provenance handling
+5. Ran sequential-thinking analysis to finalize deterministic graph contract + builder strategy.
 6. Posted full implementation plan comment to Linear before coding.
-7. Created and switched to branch `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`.
-8. Implemented ticket scope in `crates/ch-scanner/src/analyzer.rs`:
-   - propagated parser relations into `FileInfo.relation_evidence`
-   - populated `FileInfo.model_refs` from import symbols and relation endpoints
-   - deduplicated refs by `(name, category, source)` in first-seen order
-   - preserved existing status classification logic
-   - added analyzer tests for enrichment, suffix category inference, overlap dedup, and registry filtering
+7. Created and switched to branch `patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes`.
+8. Implemented QUA-126 scope in `ch-graph`:
+   - added typed graph domain contracts in `crates/ch-graph/src/graph.rs`
+   - added deterministic builder in `crates/ch-graph/src/builder.rs`
+   - updated crate exports in `crates/ch-graph/src/lib.rs` and `crates/ch-graph/src/types.rs`
+   - added focused builder tests for evidence, determinism, and dedup behavior
 9. Ran required validations successfully:
    - `cargo check --workspace`
    - `cargo clippy --workspace`
-10. Committed implementation:
-    - Commit: `ade0ba4`
-11. Posted Linear completion evidence comment and transitioned `QUA-125` to `Done`.
-12. Removed `QUA-125` from `issues.json` ordered queue.
-13. Pushed branch to origin:
-    - `git push -u origin patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
+10. Ran additional graph test compilation verification:
+   - `cargo check -p ch-graph --tests`
+11. Committed feature implementation:
+   - Commit: `c9133a5`
+12. Posted Linear completion evidence comment and transitioned `QUA-126` to `Done`.
+13. Removed `QUA-126` from `issues.json` ordered queue.
+14. Pushed branch to origin:
+   - `git push -u origin patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes`
 
 ## Verification Evidence
 
 - `cargo check --workspace` ✅
 - `cargo clippy --workspace` ✅
-- `git commit`: `ade0ba4` ✅
+- `cargo check -p ch-graph --tests` ✅
+- `git commit`: `c9133a5` ✅
 - Linear plan comment created ✅
 - Linear completion comment created ✅
 - Linear status transition to `Done` ✅
-- `issues.json` updated with `QUA-125` removed ✅
-- `git push -u origin patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch` ✅
+- `issues.json` updated with `QUA-126` removed ✅
+- `git push -u origin patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes` ✅
 
 ## Last Error
 
-- None.
+- `cargo check --workspace --tests` surfaced a pre-existing `ch-tui` test-only dependency issue (missing `smallvec` dev import); not in QUA-126 scope.
 
 ## Blockers & Notes
 
 - No active blocker on completed ticket.
-- Next queue head is `QUA-126`.
+- Next queue head is `QUA-127`.
 
 ## Files Modified
 
-- `crates/ch-scanner/src/analyzer.rs`
+- `Cargo.lock`
+- `crates/ch-graph/Cargo.toml`
+- `crates/ch-graph/src/lib.rs`
+- `crates/ch-graph/src/types.rs`
+- `crates/ch-graph/src/graph.rs`
+- `crates/ch-graph/src/builder.rs`
 - `issues.json`
 - `RALPH_STATUS.md`
 
 ## Git Summary
 
-- Branch: `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
-- Implementation commit: `ade0ba4`
-- Loop-state commits: `4c12138`, `81b89fb`, `fc6b42b`
-- Pushed: `origin/patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
+- Branch: `patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes`
+- Feature commit: `c9133a5`
+- Pushed: `origin/patelksharad/qua-126-implement-ch-graph-dependency-graph-builder-with-typed-nodes`
