@@ -246,6 +246,7 @@ dependencies = [
  "ch-core",
  "ch-ts-parser",
  "petgraph",
+ "smallvec",
 ]
 
 [[package]]

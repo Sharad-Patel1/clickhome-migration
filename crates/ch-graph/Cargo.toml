@@ -13,6 +13,7 @@ ch-core.workspace = true
 ch-ts-parser.workspace = true
 camino.workspace = true
 petgraph.workspace = true
+smallvec.workspace = true
 
 [lints]
 workspace = true

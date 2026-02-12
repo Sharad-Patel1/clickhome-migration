@@ -8,3 +8,8 @@ pub use ch_core::{
     AstRelationEvidence, CstAnchor, EdgeKind, ModelArtifact, ModelReference, ModelSource,
     SourceClassification,
 };
+
+pub use crate::graph::{
+    DependencyGraph, DependencyStableGraph, GraphCounts, GraphEdge, GraphEdgeKindCount,
+    GraphMetadata, GraphNode, GraphNodeKind, ParserMetadata,
+};
