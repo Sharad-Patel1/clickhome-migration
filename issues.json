@@ -7,22 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 8,
-      "id": "6cd0c365-7712-456b-ac4c-8eede0ff5a5c",
-      "identifier": "QUA-130",
-      "title": "Implement graph and migration-plan artifact exporters (`json`, `dot`, `md`) with snapshot modes",
-      "url": "https://linear.app/quantumqores/issue/QUA-130/implement-graph-and-migration-plan-artifact-exporters-json-dot-md-with",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-129"
-      ],
-      "blocks": [
-        "QUA-131",
-        "QUA-132",
-        "QUA-133"
-      ]
-    },
-    {
       "sequence": 9,
       "id": "442a9c48-2731-41b0-a5c8-38ea9cc76bbb",
       "identifier": "QUA-131",
