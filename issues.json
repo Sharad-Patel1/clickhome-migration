@@ -1,0 +1,139 @@
+{
+  "milestone": {
+    "id": "9c2ba166-f673-4c4b-bda6-dc6f520800ef",
+    "name": "Backlog",
+    "query": "project = \"H5 Migration\" AND status = \"Backlog\""
+  },
+  "orderingStrategy": "topological-sort-by-blockedBy",
+  "orderedIssues": [
+    {
+      "sequence": 3,
+      "id": "cf58801a-847e-4bfb-98b6-2050024b6f6d",
+      "identifier": "QUA-125",
+      "title": "Populate `model_refs` and relation evidence stream in `ch-scanner`",
+      "url": "https://linear.app/quantumqores/issue/QUA-125/populate-model-refs-and-relation-evidence-stream-in-ch-scanner",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-123",
+        "QUA-124"
+      ],
+      "blocks": [
+        "QUA-126"
+      ]
+    },
+    {
+      "sequence": 4,
+      "id": "9d60d204-14fd-41c6-8192-41757faf324d",
+      "identifier": "QUA-126",
+      "title": "Implement `ch-graph` dependency graph builder with typed nodes, edges, and provenance",
+      "url": "https://linear.app/quantumqores/issue/QUA-126/implement-ch-graph-dependency-graph-builder-with-typed-nodes-edges-and",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-125"
+      ],
+      "blocks": [
+        "QUA-127",
+        "QUA-129"
+      ]
+    },
+    {
+      "sequence": 5,
+      "id": "df03d9c6-b1d9-46fd-b334-a49cfc75dcf5",
+      "identifier": "QUA-127",
+      "title": "Implement old-vs-new model mapping and residual legacy usage diff",
+      "url": "https://linear.app/quantumqores/issue/QUA-127/implement-old-vs-new-model-mapping-and-residual-legacy-usage-diff",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-124",
+        "QUA-126"
+      ],
+      "blocks": [
+        "QUA-128"
+      ]
+    },
+    {
+      "sequence": 6,
+      "id": "33640e0d-a10b-43f1-8f0c-93d51385429b",
+      "identifier": "QUA-128",
+      "title": "Implement deterministic migration planner (SCC condensation, topological ordering, risk scoring)",
+      "url": "https://linear.app/quantumqores/issue/QUA-128/implement-deterministic-migration-planner-scc-condensation-topological",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-127"
+      ],
+      "blocks": [
+        "QUA-129"
+      ]
+    },
+    {
+      "sequence": 7,
+      "id": "8ae60e22-88ad-408c-967f-6d50a939c9ed",
+      "identifier": "QUA-129",
+      "title": "Add `graph` subcommand to `ch-cli` for graph and migration-plan generation",
+      "url": "https://linear.app/quantumqores/issue/QUA-129/add-graph-subcommand-to-ch-cli-for-graph-and-migration-plan-generation",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-126",
+        "QUA-128"
+      ],
+      "blocks": [
+        "QUA-130"
+      ]
+    },
+    {
+      "sequence": 8,
+      "id": "6cd0c365-7712-456b-ac4c-8eede0ff5a5c",
+      "identifier": "QUA-130",
+      "title": "Implement graph and migration-plan artifact exporters (`json`, `dot`, `md`) with snapshot modes",
+      "url": "https://linear.app/quantumqores/issue/QUA-130/implement-graph-and-migration-plan-artifact-exporters-json-dot-md-with",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-129"
+      ],
+      "blocks": [
+        "QUA-131",
+        "QUA-132",
+        "QUA-133"
+      ]
+    },
+    {
+      "sequence": 9,
+      "id": "442a9c48-2731-41b0-a5c8-38ea9cc76bbb",
+      "identifier": "QUA-131",
+      "title": "Enforce performance and determinism guarantees for extraction, graphing, and planning",
+      "url": "https://linear.app/quantumqores/issue/QUA-131/enforce-performance-and-determinism-guarantees-for-extraction-graphing",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-130"
+      ],
+      "blocks": [
+        "QUA-132"
+      ]
+    },
+    {
+      "sequence": 10,
+      "id": "b15d813a-b6b7-476a-a41b-44050b09dfb0",
+      "identifier": "QUA-132",
+      "title": "Deliver end-to-end test matrix, fixtures, and golden snapshots for graph planning milestone",
+      "url": "https://linear.app/quantumqores/issue/QUA-132/deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots-for-graph",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-130",
+        "QUA-131"
+      ],
+      "blocks": []
+    },
+    {
+      "sequence": 11,
+      "id": "5fbd2528-b0a5-4469-8446-11b2bf367035",
+      "identifier": "QUA-133",
+      "title": "[Phase 2, non-blocking] Add `ch-tui` graph summary and dependency drilldown views",
+      "url": "https://linear.app/quantumqores/issue/QUA-133/phase-2-non-blocking-add-ch-tui-graph-summary-and-dependency-drilldown",
+      "status": "Backlog",
+      "blockedBy": [
+        "QUA-130"
+      ],
+      "blocks": []
+    }
+  ]
+}
