@@ -211,6 +211,7 @@ dependencies = [
  "anyhow",
  "camino",
  "ch-core",
+ "ch-graph",
  "ch-scanner",
  "ch-ts-parser",
  "ch-tui",
