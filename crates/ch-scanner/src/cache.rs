@@ -34,6 +34,46 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ch_core::{FileInfo, FxHashMap, MigrationStatus, fx_hash_map_with_capacity};
 use parking_lot::RwLock;
 
+/// Version-aware cache key for scanner analysis artifacts.
+///
+/// A file is considered fresh only when:
+/// - The source `content` fingerprint is unchanged.
+/// - The parser version fingerprint matches.
+/// - The query version fingerprint matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AnalysisCacheKey {
+    /// Fingerprint of source contents.
+    pub content: u64,
+    /// Fingerprint of parser implementation version.
+    pub parser_version: u64,
+    /// Fingerprint of query bundle version.
+    pub query_version: u64,
+}
+
+impl AnalysisCacheKey {
+    /// Creates a new cache key.
+    #[inline]
+    #[must_use]
+    pub const fn new(content: u64, parser_version: u64, query_version: u64) -> Self {
+        Self { content, parser_version, query_version }
+    }
+
+    /// Creates a compatibility key using content hash only.
+    ///
+    /// This keeps legacy APIs (`insert`, `needs_update`) behavior stable.
+    #[inline]
+    #[must_use]
+    pub const fn from_content_hash(content: u64) -> Self {
+        Self::new(content, 0, 0)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ScanCacheEntry {
+    file: FileInfo,
+    key: AnalysisCacheKey,
+}
+
 /// A thread-safe cache for storing [`FileInfo`] results.
 ///
 /// Uses an `FxHashMap` guarded by a `RwLock` for concurrent access.
@@ -70,7 +110,7 @@ use parking_lot::RwLock;
 #[derive(Debug, Default)]
 pub struct ScanCache {
     /// The underlying concurrent map.
-    files: RwLock<FxHashMap<Utf8PathBuf, FileInfo>>,
+    files: RwLock<FxHashMap<Utf8PathBuf, ScanCacheEntry>>,
 }
 
 impl ScanCache {
@@ -129,7 +169,15 @@ impl ScanCache {
     /// assert_eq!(cache.len(), 1);
     /// ```
     pub fn insert(&self, file: FileInfo) {
-        self.files.write().insert(file.path.clone(), file);
+        let key = AnalysisCacheKey::from_content_hash(file.content_hash);
+        self.insert_with_key(file, key);
+    }
+
+    /// Inserts a file with an explicit version-aware cache key.
+    ///
+    /// If a file with the same path already exists, it is replaced.
+    pub fn insert_with_key(&self, file: FileInfo, key: AnalysisCacheKey) {
+        self.files.write().insert(file.path.clone(), ScanCacheEntry { file, key });
     }
 
     /// Returns a clone of the file info for the given path, if present.
@@ -158,7 +206,7 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn get(&self, path: &Utf8PathBuf) -> Option<FileInfo> {
-        self.files.read().get(path).cloned()
+        self.files.read().get(path).map(|entry| entry.file.clone())
     }
 
     /// Returns a clone of the file info for the given path reference, if present.
@@ -172,7 +220,13 @@ impl ScanCache {
     /// A clone of the [`FileInfo`] if found, or `None`.
     #[must_use]
     pub fn get_by_path(&self, path: &Utf8Path) -> Option<FileInfo> {
-        self.files.read().get(path).cloned()
+        self.files.read().get(path).map(|entry| entry.file.clone())
+    }
+
+    /// Returns a cloned file only when the cache key is still fresh.
+    #[must_use]
+    pub fn get_if_fresh(&self, path: &Utf8Path, key: AnalysisCacheKey) -> Option<FileInfo> {
+        self.files.read().get(path).filter(|entry| entry.key == key).map(|entry| entry.file.clone())
     }
 
     /// Checks if a file is in the cache.
@@ -209,7 +263,7 @@ impl ScanCache {
     ///
     /// The removed [`FileInfo`] if found, or `None`.
     pub fn remove(&self, path: &Utf8PathBuf) -> Option<FileInfo> {
-        self.files.write().remove(path)
+        self.files.write().remove(path).map(|entry| entry.file)
     }
 
     /// Returns the number of files in the cache.
@@ -284,7 +338,16 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn needs_update(&self, path: &Utf8PathBuf, content_hash: u64) -> bool {
-        self.files.read().get(path).is_none_or(|file| file.content_hash != content_hash)
+        let key = AnalysisCacheKey::from_content_hash(content_hash);
+        self.needs_update_with_key(path, key)
+    }
+
+    /// Checks if a file needs to be updated using the full analysis cache key.
+    ///
+    /// Returns `true` if the file is missing or the stored key differs.
+    #[must_use]
+    pub fn needs_update_with_key(&self, path: &Utf8Path, key: AnalysisCacheKey) -> bool {
+        self.files.read().get(path).is_none_or(|entry| entry.key != key)
     }
 
     /// Returns all files with the specified migration status.
@@ -315,7 +378,12 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn files_with_status(&self, status: MigrationStatus) -> Vec<FileInfo> {
-        self.files.read().values().filter(|file| file.status == status).cloned().collect()
+        self.files
+            .read()
+            .values()
+            .filter(|entry| entry.file.status == status)
+            .map(|entry| entry.file.clone())
+            .collect()
     }
 
     /// Returns all files that need migration.
@@ -341,7 +409,12 @@ impl ScanCache {
     /// ```
     #[must_use]
     pub fn files_needing_migration(&self) -> Vec<FileInfo> {
-        self.files.read().values().filter(|file| file.status.needs_migration()).cloned().collect()
+        self.files
+            .read()
+            .values()
+            .filter(|entry| entry.file.status.needs_migration())
+            .map(|entry| entry.file.clone())
+            .collect()
     }
 
     /// Returns all files in the cache as a vector.
@@ -351,7 +424,7 @@ impl ScanCache {
     /// A vector of cloned [`FileInfo`] for all cached files.
     #[must_use]
     pub fn all_files(&self) -> Vec<FileInfo> {
-        self.files.read().values().cloned().collect()
+        self.files.read().values().map(|entry| entry.file.clone()).collect()
     }
 
     /// Returns all file paths in the cache.
@@ -374,6 +447,14 @@ mod tests {
         let mut file = FileInfo::new(FileId::new(id), Utf8PathBuf::from(path));
         file.status = status;
         file
+    }
+
+    const fn make_key(
+        content_hash: u64,
+        parser_version_hash: u64,
+        query_version_hash: u64,
+    ) -> AnalysisCacheKey {
+        AnalysisCacheKey::new(content_hash, parser_version_hash, query_version_hash)
     }
 
     #[test]
@@ -444,6 +525,24 @@ mod tests {
 
         // Different hash -> needs update
         assert!(cache.needs_update(&path, 99999));
+    }
+
+    #[test]
+    fn test_cache_needs_update_with_versioned_key() {
+        let cache = ScanCache::new();
+        let path = Utf8PathBuf::from("src/foo.ts");
+        let key = make_key(12345, 100, 200);
+
+        let mut file = FileInfo::new(FileId::new(1), path.clone());
+        file.content_hash = 12345;
+        cache.insert_with_key(file, key);
+
+        assert!(!cache.needs_update_with_key(&path, key));
+        assert!(cache.get_if_fresh(&path, key).is_some());
+        assert!(cache.needs_update_with_key(&path, make_key(12345, 101, 200)));
+        assert!(cache.needs_update_with_key(&path, make_key(12345, 100, 201)));
+        assert!(cache.needs_update_with_key(&path, make_key(54321, 100, 200)));
+        assert!(cache.get_if_fresh(&path, make_key(54321, 100, 200)).is_none());
     }
 
     #[test]

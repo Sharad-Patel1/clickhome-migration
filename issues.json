@@ -7,20 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 9,
-      "id": "442a9c48-2731-41b0-a5c8-38ea9cc76bbb",
-      "identifier": "QUA-131",
-      "title": "Enforce performance and determinism guarantees for extraction, graphing, and planning",
-      "url": "https://linear.app/quantumqores/issue/QUA-131/enforce-performance-and-determinism-guarantees-for-extraction-graphing",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-130"
-      ],
-      "blocks": [
-        "QUA-132"
-      ]
-    },
-    {
       "sequence": 10,
       "id": "b15d813a-b6b7-476a-a41b-44050b09dfb0",
       "identifier": "QUA-132",

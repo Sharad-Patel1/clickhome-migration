@@ -163,6 +163,11 @@
 #![deny(clippy::all)]
 #![warn(missing_docs)]
 
+use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
+
+use rustc_hash::FxHasher;
+
 pub mod arena;
 pub mod error;
 pub mod exports;
@@ -197,3 +202,51 @@ pub use tree_sitter::InputEdit;
 
 // Re-export bumpalo for convenience (consumers need it for ArenaParser)
 pub use bumpalo::Bump;
+
+/// Returns the semantic parser version label used for cache and artifact metadata.
+///
+/// This label tracks the `ch-ts-parser` crate version and should be considered
+/// part of the scanner cache invalidation contract.
+#[must_use]
+pub const fn parser_version() -> &'static str {
+    concat!("ch-ts-parser/", env!("CARGO_PKG_VERSION"))
+}
+
+/// Returns a stable parser version fingerprint for cache keying.
+#[must_use]
+pub fn parser_version_hash() -> u64 {
+    static VERSION_HASH: OnceLock<u64> = OnceLock::new();
+    *VERSION_HASH.get_or_init(|| hash_str(parser_version()))
+}
+
+/// Returns the relation-query fingerprint used for cache invalidation.
+#[must_use]
+pub fn relation_query_hash() -> u64 {
+    static QUERY_HASH: OnceLock<u64> = OnceLock::new();
+    *QUERY_HASH.get_or_init(|| hash_str(queries::RELATION_QUERY))
+}
+
+/// Returns a human-readable relation-query version label.
+#[must_use]
+pub fn relation_query_version() -> &'static str {
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION.get_or_init(|| format!("relation-query/{:016x}", relation_query_hash())).as_str()
+}
+
+/// Returns a combined query fingerprint covering import and relation queries.
+#[must_use]
+pub fn query_version_hash() -> u64 {
+    static QUERY_VERSION_HASH: OnceLock<u64> = OnceLock::new();
+    *QUERY_VERSION_HASH.get_or_init(|| {
+        let mut hasher = FxHasher::default();
+        queries::IMPORT_QUERY.hash(&mut hasher);
+        queries::RELATION_QUERY.hash(&mut hasher);
+        hasher.finish()
+    })
+}
+
+fn hash_str(value: &str) -> u64 {
+    let mut hasher = FxHasher::default();
+    value.hash(&mut hasher);
+    hasher.finish()
+}

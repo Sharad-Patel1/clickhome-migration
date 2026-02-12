@@ -23,6 +23,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
@@ -31,7 +32,7 @@ use ch_graph::{
     GraphPlanner, PlannerConfig, build_inventory, export_artifacts,
 };
 use ch_scanner::{ScanConfig as ScannerConfig, Scanner, StatsSnapshot};
-use ch_ts_parser::ModelPathMatcher;
+use ch_ts_parser::{ModelPathMatcher, parser_version, relation_query_version};
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing::info;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
@@ -492,10 +493,13 @@ fn run_graph(
         "Building graph artifacts"
     );
 
+    let parse_phase_start = Instant::now();
     let scanner = create_scanner(config, true)?;
     let result = scanner.scan()?;
     let all_files = scanner.cache().all_files();
+    let parse_phase_elapsed = parse_phase_start.elapsed();
 
+    let graph_phase_start = Instant::now();
     let inventory = build_inventory(scanner.registry());
     let graph = DependencyGraphBuilder::new()
         .with_source_roots(vec![
@@ -504,11 +508,19 @@ fn run_graph(
             config.scan.shared_path.clone(),
             config.scan.shared_2023_path.clone(),
         ])
+        .with_parser_metadata(
+            Some(parser_version().to_owned()),
+            Some(relation_query_version().to_owned()),
+        )
         .build(&inventory, &all_files);
     let diff = GraphComparator::new().compare(&inventory, &all_files);
+    let graph_phase_elapsed = graph_phase_start.elapsed();
+
+    let plan_phase_start = Instant::now();
     let planner =
         GraphPlanner::with_config(PlannerConfig { max_steps, ..PlannerConfig::default() });
     let plan = planner.plan(&graph, &diff);
+    let plan_phase_elapsed = plan_phase_start.elapsed();
 
     let written = export_artifacts(
         output_dir.as_path(),
@@ -531,6 +543,13 @@ fn run_graph(
         graph.node_count(),
         graph.edge_count(),
         plan.steps.len()
+    )?;
+    writeln!(
+        out,
+        "Runtime summary: parse={}ms graph={}ms plan={}ms",
+        parse_phase_elapsed.as_millis(),
+        graph_phase_elapsed.as_millis(),
+        plan_phase_elapsed.as_millis()
     )?;
 
     if !result.errors.is_empty() {

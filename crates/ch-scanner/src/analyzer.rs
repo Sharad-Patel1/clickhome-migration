@@ -54,7 +54,10 @@ use ch_core::{
     AstRelationEvidence, FileId, FileInfo, ImportInfo, MigrationStatus, ModelCategory,
     ModelReference, ModelRegistry, ModelSource,
 };
-use ch_ts_parser::{ArenaParser, ModelPathMatcher, detect_model_source_with};
+use ch_ts_parser::{
+    ArenaParser, ModelPathMatcher, detect_model_source_with, parser_version_hash,
+    query_version_hash,
+};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashSet, FxHasher};
@@ -62,9 +65,37 @@ use smallvec::SmallVec;
 use tokio::sync::mpsc;
 
 use crate::ScanUpdate;
-use crate::cache::ScanCache;
+use crate::cache::{AnalysisCacheKey, ScanCache};
 use crate::error::ScanError;
 use crate::stats::ScanStats;
+
+/// Origin of a file analysis result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnalysisSource {
+    /// File was parsed during this pass.
+    Parsed,
+    /// File was reused from cache.
+    CacheHit,
+}
+
+/// Result payload for cache-aware file analysis.
+#[derive(Debug, Clone)]
+pub(crate) struct AnalysisOutcome {
+    /// File analysis payload.
+    pub file_info: FileInfo,
+    /// Cache key used for freshness checks.
+    pub cache_key: AnalysisCacheKey,
+    /// Source of the returned file info.
+    pub source: AnalysisSource,
+}
+
+struct AnalysisContext<'a> {
+    ts_parser: Option<&'a mut ArenaParser>,
+    tsx_parser: Option<&'a mut ArenaParser>,
+    arena: &'a bumpalo::Bump,
+    matcher: &'a ModelPathMatcher,
+    registry: Option<&'a ModelRegistry>,
+}
 
 /// Parallel file analyzer using rayon and per-thread arenas.
 ///
@@ -161,14 +192,52 @@ impl FileAnalyzer {
                 },
                 // Process each file
                 |(ts_parser, tsx_parser, member), path| {
-                    let result = self.analyze_file_inner(
-                        path,
-                        ts_parser.as_mut(),
-                        tsx_parser.as_mut(),
-                        member.as_bump(),
+                    let context = AnalysisContext {
+                        ts_parser: ts_parser.as_mut(),
+                        tsx_parser: tsx_parser.as_mut(),
+                        arena: member.as_bump(),
                         matcher,
                         registry,
-                    );
+                    };
+                    let result = Self::analyze_file_inner(path, context);
+                    (path.clone(), result)
+                },
+            )
+            .collect()
+    }
+
+    /// Analyzes files in parallel with version-aware cache reuse.
+    ///
+    /// Each file is read once to compute a content hash. If the cache key
+    /// (content hash + parser/query version fingerprints) is fresh, cached data
+    /// is reused. Otherwise, the file is parsed and returned as [`AnalysisSource::Parsed`].
+    #[must_use]
+    pub(crate) fn analyze_files_with_cache(
+        paths: &[Utf8PathBuf],
+        matcher: &ModelPathMatcher,
+        registry: Option<&ModelRegistry>,
+        cache: &ScanCache,
+    ) -> Vec<(Utf8PathBuf, Result<AnalysisOutcome, ScanError>)> {
+        let herd = Herd::new();
+
+        paths
+            .par_iter()
+            .map_init(
+                || {
+                    let ts_parser = ArenaParser::new().ok();
+                    let tsx_parser = ArenaParser::new_tsx().ok();
+                    let member = herd.get();
+                    (ts_parser, tsx_parser, member)
+                },
+                |(ts_parser, tsx_parser, member), path| {
+                    let context = AnalysisContext {
+                        ts_parser: ts_parser.as_mut(),
+                        tsx_parser: tsx_parser.as_mut(),
+                        arena: member.as_bump(),
+                        matcher,
+                        registry,
+                    };
+                    let result = Self::analyze_file_with_cache_inner(path, context, cache);
                     (path.clone(), result)
                 },
             )
@@ -226,17 +295,18 @@ impl FileAnalyzer {
             |(ts_parser, tsx_parser, member, sender), path| {
                 stats.increment_total();
 
-                let result = self.analyze_file_inner(
-                    path,
-                    ts_parser.as_mut(),
-                    tsx_parser.as_mut(),
-                    member.as_bump(),
+                let context = AnalysisContext {
+                    ts_parser: ts_parser.as_mut(),
+                    tsx_parser: tsx_parser.as_mut(),
+                    arena: member.as_bump(),
                     matcher,
                     registry,
-                );
+                };
+                let result = Self::analyze_file_with_cache_inner(path, context, cache);
 
                 match result {
-                    Ok(file_info) => {
+                    Ok(outcome) => {
+                        let file_info = outcome.file_info;
                         // Update statistics based on status
                         match file_info.status {
                             MigrationStatus::Legacy => stats.increment_legacy(),
@@ -246,8 +316,9 @@ impl FileAnalyzer {
                             _ => {} // Handle any future status variants
                         }
 
-                        // Insert into cache
-                        cache.insert(file_info.clone());
+                        if outcome.source == AnalysisSource::Parsed {
+                            cache.insert_with_key(file_info.clone(), outcome.cache_key);
+                        }
 
                         // Send update (ignore if receiver dropped)
                         // Box the FileInfo to match ScanUpdate::FileScanned(Box<FileInfo>)
@@ -302,41 +373,75 @@ impl FileAnalyzer {
         let mut parser = if is_tsx { ArenaParser::new_tsx() } else { ArenaParser::new() }
             .map_err(|e| ScanError::parse(path, e))?;
 
-        self.analyze_file_inner(path, Some(&mut parser), None, &arena, matcher, registry)
+        let context = AnalysisContext {
+            ts_parser: Some(&mut parser),
+            tsx_parser: None,
+            arena: &arena,
+            matcher,
+            registry,
+        };
+
+        Self::analyze_file_inner(path, context)
+    }
+
+    /// Internal cache-aware file analysis implementation.
+    fn analyze_file_with_cache_inner(
+        path: &Utf8Path,
+        context: AnalysisContext<'_>,
+        cache: &ScanCache,
+    ) -> Result<AnalysisOutcome, ScanError> {
+        let contents =
+            fs::read_to_string(path.as_std_path()).map_err(|e| ScanError::read(path, e))?;
+        let content_hash = hash_content(&contents);
+        let cache_key = analysis_cache_key(content_hash);
+
+        if let Some(file_info) = cache.get_if_fresh(path, cache_key) {
+            return Ok(AnalysisOutcome { file_info, cache_key, source: AnalysisSource::CacheHit });
+        }
+
+        let file_info = Self::analyze_contents_inner(path, &contents, content_hash, context)?;
+
+        Ok(AnalysisOutcome { file_info, cache_key, source: AnalysisSource::Parsed })
     }
 
     /// Internal file analysis implementation.
-    #[allow(clippy::unused_self)] // Method signature kept for consistency
     fn analyze_file_inner(
-        &self,
         path: &Utf8Path,
-        ts_parser: Option<&mut ArenaParser>,
-        tsx_parser: Option<&mut ArenaParser>,
-        arena: &bumpalo::Bump,
-        matcher: &ModelPathMatcher,
-        registry: Option<&ModelRegistry>,
+        context: AnalysisContext<'_>,
     ) -> Result<FileInfo, ScanError> {
-        // Read file contents
         let contents =
             fs::read_to_string(path.as_std_path()).map_err(|e| ScanError::read(path, e))?;
-
-        // Calculate content hash
         let content_hash = hash_content(&contents);
 
+        Self::analyze_contents_inner(path, &contents, content_hash, context)
+    }
+
+    /// Parses and analyzes in-memory source contents.
+    fn analyze_contents_inner(
+        path: &Utf8Path,
+        contents: &str,
+        content_hash: u64,
+        context: AnalysisContext<'_>,
+    ) -> Result<FileInfo, ScanError> {
         // Generate file ID from path hash
         let file_id = FileId::new(hash_path(path));
 
         // Select parser based on extension
         let is_tsx = path.extension().is_some_and(|e| e == "tsx");
-        let parser = if is_tsx { tsx_parser.or(ts_parser) } else { ts_parser.or(tsx_parser) };
+        let parser = if is_tsx {
+            context.tsx_parser.or(context.ts_parser)
+        } else {
+            context.ts_parser.or(context.tsx_parser)
+        };
 
         let Some(parser) = parser else {
             return Err(ScanError::config("no parser available"));
         };
 
         // Parse the file
-        let parse_result =
-            parser.parse_with_arena(arena, &contents).map_err(|e| ScanError::parse(path, e))?;
+        let parse_result = parser
+            .parse_with_arena(context.arena, contents)
+            .map_err(|e| ScanError::parse(path, e))?;
 
         let relation_evidence: SmallVec<[AstRelationEvidence; 4]> =
             parse_result.relations.into_iter().collect();
@@ -351,10 +456,10 @@ impl FileAnalyzer {
         // Process each import: detect source and optionally filter by registry
         for import in &mut imports {
             // First, detect if this is a shared directory import
-            if let Some(detected_source) = detect_model_source_with(&import.path, matcher) {
+            if let Some(detected_source) = detect_model_source_with(&import.path, context.matcher) {
                 // If we have a registry, validate that at least one imported name
                 // is a known model export from the detected source
-                if let Some(reg) = registry {
+                if let Some(reg) = context.registry {
                     let has_model_export =
                         import.names.iter().any(|name| reg.is_export_from(name, detected_source));
 
@@ -370,7 +475,7 @@ impl FileAnalyzer {
         }
 
         let status = determine_status(&imports);
-        let model_refs = build_model_refs(&imports, &relation_evidence, registry);
+        let model_refs = build_model_refs(&imports, &relation_evidence, context.registry);
 
         // Get current timestamp
         let last_scanned =
@@ -505,6 +610,10 @@ fn hash_content(content: &str) -> u64 {
     let mut hasher = FxHasher::default();
     content.hash(&mut hasher);
     hasher.finish()
+}
+
+fn analysis_cache_key(content_hash: u64) -> AnalysisCacheKey {
+    AnalysisCacheKey::new(content_hash, parser_version_hash(), query_version_hash())
 }
 
 /// Computes a fast hash of a file path using `FxHash`.
