@@ -58,7 +58,7 @@
 11. Posted Linear completion evidence comment and transitioned `QUA-124` to `Done`.
 12. Removed `QUA-124` from `issues.json` ordered queue.
 13. Committed loop-state artifacts and pushed branch:
-   - Commit: `d7ba5fd`
+   - Additional loop-state commit(s) recorded after implementation
    - `git push -u origin patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
 
 ## Verification Evidence
@@ -66,7 +66,7 @@
 - `cargo check --workspace` ✅
 - `cargo clippy --workspace` ✅
 - `git commit`: `fe9b441` ✅
-- `git commit`: `d7ba5fd` ✅
+- Loop-state commit(s) for `issues.json`/`RALPH_STATUS.md` recorded ✅
 - `git push -u origin patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for` ✅
 - Linear plan comment created ✅
 - Linear completion comment created ✅
@@ -99,5 +99,6 @@
 ## Git Summary
 
 - Branch: `patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
-- Commits: `fe9b441`, `d7ba5fd`
+- Implementation commit: `fe9b441`
+- Additional loop-state commit(s): present on branch history
 - Pushed: `origin/patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
