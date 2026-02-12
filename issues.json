@@ -7,19 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 10,
-      "id": "b15d813a-b6b7-476a-a41b-44050b09dfb0",
-      "identifier": "QUA-132",
-      "title": "Deliver end-to-end test matrix, fixtures, and golden snapshots for graph planning milestone",
-      "url": "https://linear.app/quantumqores/issue/QUA-132/deliver-end-to-end-test-matrix-fixtures-and-golden-snapshots-for-graph",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-130",
-        "QUA-131"
-      ],
-      "blocks": []
-    },
-    {
       "sequence": 11,
       "id": "5fbd2528-b0a5-4469-8446-11b2bf367035",
       "identifier": "QUA-133",
