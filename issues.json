@@ -7,20 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 6,
-      "id": "33640e0d-a10b-43f1-8f0c-93d51385429b",
-      "identifier": "QUA-128",
-      "title": "Implement deterministic migration planner (SCC condensation, topological ordering, risk scoring)",
-      "url": "https://linear.app/quantumqores/issue/QUA-128/implement-deterministic-migration-planner-scc-condensation-topological",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-127"
-      ],
-      "blocks": [
-        "QUA-129"
-      ]
-    },
-    {
       "sequence": 7,
       "id": "8ae60e22-88ad-408c-967f-6d50a939c9ed",
       "identifier": "QUA-129",
