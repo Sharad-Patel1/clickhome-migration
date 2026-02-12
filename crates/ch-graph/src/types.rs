@@ -5,5 +5,6 @@
 //! `ch-core`.
 
 pub use ch_core::{
-    AstRelationEvidence, CstAnchor, EdgeKind, ModelReference, ModelSource, SourceClassification,
+    AstRelationEvidence, CstAnchor, EdgeKind, ModelArtifact, ModelReference, ModelSource,
+    SourceClassification,
 };

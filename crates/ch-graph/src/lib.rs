@@ -14,8 +14,13 @@
 #![deny(clippy::all)]
 #![warn(missing_docs)]
 
+pub mod inventory;
 pub mod types;
 
+pub use inventory::{
+    CanonicalFallbackHit, InventoryAmbiguity, InventorySlotKind, ModelInventory,
+    ModelInventoryBuilder, ModelInventoryRecord, build_inventory,
+};
 use petgraph::Directed;
 use petgraph::graph::{Graph, NodeIndex};
 

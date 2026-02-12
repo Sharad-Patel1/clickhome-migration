@@ -115,6 +115,8 @@ impl ModelSource {
 /// - `CodeGenForApi`: `{ModelName}CodeGenForApi` (extends `BaseForApiModel`)
 /// - `CodeGenForm`: `{ModelName}CodeGenForm` (extends `BaseModelForm`)
 /// - `CodeGenFormArray`: `{ModelName}CodeGenFormArray` (extends `BaseModelFormArray`)
+/// - Service: `{ModelName}Service`
+/// - `ServiceCodeGen`: `{ModelName}ServiceCodeGen`
 ///
 /// # Examples
 ///
@@ -134,6 +136,9 @@ pub enum ModelCategory {
     /// Main model class that extends the `CodeGen` class.
     Model,
 
+    /// Service wrapper class (naming: `{ModelName}Service`).
+    Service,
+
     /// Base codegen class (naming: `{ModelName}CodeGen`).
     CodeGen,
 
@@ -145,6 +150,9 @@ pub enum ModelCategory {
 
     /// Form array class (naming: `{ModelName}CodeGenFormArray`).
     CodeGenFormArray,
+
+    /// Service codegen class (naming: `{ModelName}ServiceCodeGen`).
+    ServiceCodeGen,
 }
 
 impl ModelCategory {
@@ -164,10 +172,12 @@ impl ModelCategory {
         match self {
             Self::Interface => "Model",
             Self::Model => "",
+            Self::Service => "Service",
             Self::CodeGen => "CodeGen",
             Self::CodeGenForApi => "CodeGenForApi",
             Self::CodeGenForm => "CodeGenForm",
             Self::CodeGenFormArray => "CodeGenFormArray",
+            Self::ServiceCodeGen => "ServiceCodeGen",
         }
     }
 
@@ -187,7 +197,11 @@ impl ModelCategory {
     pub const fn is_codegen(self) -> bool {
         matches!(
             self,
-            Self::CodeGen | Self::CodeGenForApi | Self::CodeGenForm | Self::CodeGenFormArray
+            Self::CodeGen
+                | Self::CodeGenForApi
+                | Self::CodeGenForm
+                | Self::CodeGenFormArray
+                | Self::ServiceCodeGen
         )
     }
 }
@@ -463,6 +477,48 @@ impl ModelReference {
     #[must_use]
     pub const fn is_legacy(&self) -> bool {
         self.source.is_legacy()
+    }
+}
+
+/// A concrete model artifact resolved from exported symbols and file metadata.
+///
+/// This structure preserves enough provenance for deterministic inventory,
+/// graphing, and comparator stages.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ModelArtifact {
+    /// Logical model name associated with the artifact.
+    pub model_name: String,
+
+    /// Artifact category.
+    pub category: ModelCategory,
+
+    /// Source ecosystem where the artifact was discovered.
+    pub source: ModelSource,
+
+    /// Definition path where the artifact is declared.
+    pub definition_path: Utf8PathBuf,
+
+    /// Exported symbol name that validated this artifact.
+    pub export_name: String,
+}
+
+impl ModelArtifact {
+    /// Creates a new concrete model artifact.
+    #[must_use]
+    pub fn new(
+        model_name: impl Into<String>,
+        category: ModelCategory,
+        source: ModelSource,
+        definition_path: impl Into<Utf8PathBuf>,
+        export_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            model_name: model_name.into(),
+            category,
+            source,
+            definition_path: definition_path.into(),
+            export_name: export_name.into(),
+        }
     }
 }
 
@@ -938,20 +994,24 @@ mod tests {
     fn test_model_category_suffix() {
         assert_eq!(ModelCategory::Interface.suffix(), "Model");
         assert_eq!(ModelCategory::Model.suffix(), "");
+        assert_eq!(ModelCategory::Service.suffix(), "Service");
         assert_eq!(ModelCategory::CodeGen.suffix(), "CodeGen");
         assert_eq!(ModelCategory::CodeGenForApi.suffix(), "CodeGenForApi");
         assert_eq!(ModelCategory::CodeGenForm.suffix(), "CodeGenForm");
         assert_eq!(ModelCategory::CodeGenFormArray.suffix(), "CodeGenFormArray");
+        assert_eq!(ModelCategory::ServiceCodeGen.suffix(), "ServiceCodeGen");
     }
 
     #[test]
     fn test_model_category_is_codegen() {
         assert!(!ModelCategory::Interface.is_codegen());
         assert!(!ModelCategory::Model.is_codegen());
+        assert!(!ModelCategory::Service.is_codegen());
         assert!(ModelCategory::CodeGen.is_codegen());
         assert!(ModelCategory::CodeGenForApi.is_codegen());
         assert!(ModelCategory::CodeGenForm.is_codegen());
         assert!(ModelCategory::CodeGenFormArray.is_codegen());
+        assert!(ModelCategory::ServiceCodeGen.is_codegen());
     }
 
     #[test]
@@ -973,6 +1033,23 @@ mod tests {
 
         let new = ModelReference::new("Foo", ModelCategory::Model, ModelSource::Shared2023);
         assert!(!new.is_legacy());
+    }
+
+    #[test]
+    fn test_model_artifact_constructor() {
+        let artifact = ModelArtifact::new(
+            "Order",
+            ModelCategory::CodeGen,
+            ModelSource::SharedLegacy,
+            "shared/models/order.ts",
+            "OrderCodeGen",
+        );
+
+        assert_eq!(artifact.model_name, "Order");
+        assert_eq!(artifact.category, ModelCategory::CodeGen);
+        assert_eq!(artifact.source, ModelSource::SharedLegacy);
+        assert_eq!(artifact.definition_path, Utf8PathBuf::from("shared/models/order.ts"));
+        assert_eq!(artifact.export_name, "OrderCodeGen");
     }
 
     #[test]

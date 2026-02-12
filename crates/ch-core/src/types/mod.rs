@@ -36,7 +36,7 @@ pub use file::{FileId, FileInfo};
 pub use import::{ImportInfo, ImportKind};
 pub use location::SourceLocation;
 pub use model::{
-    AstRelationEvidence, CstAnchor, EdgeKind, ExportKind, ModelCategory, ModelDefinition,
-    ModelReference, ModelRegistry, ModelSource, SourceClassification,
+    AstRelationEvidence, CstAnchor, EdgeKind, ExportKind, ModelArtifact, ModelCategory,
+    ModelDefinition, ModelReference, ModelRegistry, ModelSource, SourceClassification,
 };
 pub use status::MigrationStatus;

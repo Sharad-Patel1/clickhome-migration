@@ -10,6 +10,8 @@ description = "Dependency graph foundations for migration planning"
 
 [dependencies]
 ch-core.workspace = true
+ch-ts-parser.workspace = true
+camino.workspace = true
 petgraph.workspace = true
 
 [lints]
