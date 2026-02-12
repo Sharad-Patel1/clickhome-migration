@@ -27,21 +27,35 @@
 //!     .collect();
 //! ```
 
+use std::sync::OnceLock;
+
 use bumpalo::Bump;
-use ch_core::ImportInfo;
+use ch_core::{AstRelationEvidence, ImportInfo};
 use smallvec::SmallVec;
 use tree_sitter::{InputEdit, Language, Parser, Query, Tree};
 
 use crate::arena::BumpImportInfo;
 use crate::error::ParseError;
 use crate::import::{extract_imports, extract_imports_arena};
-use crate::queries::{get_tsx_import_query, get_typescript_import_query};
+use crate::queries::{
+    get_tsx_import_query, get_tsx_relation_query, get_typescript_import_query,
+    get_typescript_relation_query,
+};
+use crate::relations::extract_model_relations;
+use crate::source::ModelPathMatcher;
 
 /// Indicates whether the parser is configured for TypeScript or TSX.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParserKind {
     TypeScript,
     Tsx,
+}
+
+/// Shared default matcher used by parser APIs that do not receive explicit config.
+static DEFAULT_MODEL_PATH_MATCHER: OnceLock<ModelPathMatcher> = OnceLock::new();
+
+fn default_model_path_matcher() -> &'static ModelPathMatcher {
+    DEFAULT_MODEL_PATH_MATCHER.get_or_init(ModelPathMatcher::default)
 }
 
 /// Result of parsing a TypeScript file with owned string data.
@@ -65,6 +79,12 @@ pub struct ParseResult {
     /// Uses `SmallVec<[ImportInfo; 8]>` to avoid heap allocation for
     /// typical files with 8 or fewer imports.
     pub imports: SmallVec<[ImportInfo; 8]>,
+
+    /// Normalized relation evidence extracted from AST/CST patterns.
+    ///
+    /// Uses `SmallVec<[AstRelationEvidence; 16]>` to avoid heap allocation for
+    /// typical files with modest relation counts.
+    pub relations: SmallVec<[AstRelationEvidence; 16]>,
 
     /// The syntax tree from parsing.
     ///
@@ -108,6 +128,11 @@ pub struct BumpParseResult<'bump> {
     /// String data is borrowed from the arena.
     pub imports: SmallVec<[BumpImportInfo<'bump>; 8]>,
 
+    /// Normalized relation evidence extracted from AST/CST patterns.
+    ///
+    /// Relation payloads are currently owned types.
+    pub relations: SmallVec<[AstRelationEvidence; 16]>,
+
     /// The syntax tree from parsing.
     pub tree: Tree,
 }
@@ -120,6 +145,7 @@ impl BumpParseResult<'_> {
     pub fn into_owned(self) -> ParseResult {
         ParseResult {
             imports: self.imports.into_iter().map(BumpImportInfo::into_owned).collect(),
+            relations: self.relations,
             tree: self.tree,
         }
     }
@@ -239,6 +265,14 @@ impl TsParser {
         }
     }
 
+    /// Returns the appropriate relation query for this parser's language.
+    fn get_relation_query(&self) -> Result<&'static Query, ParseError> {
+        match self.kind {
+            ParserKind::TypeScript => get_typescript_relation_query(),
+            ParserKind::Tsx => get_tsx_relation_query(),
+        }
+    }
+
     /// Parses TypeScript source code and extracts imports.
     ///
     /// This is a fresh parse that creates a new syntax tree. For re-parsing
@@ -277,8 +311,16 @@ impl TsParser {
 
         let query = self.get_query()?;
         let imports = extract_imports(&tree, source, query);
+        let relation_query = self.get_relation_query()?;
+        let relations = extract_model_relations(
+            &tree,
+            source,
+            relation_query,
+            default_model_path_matcher(),
+            None,
+        );
 
-        Ok(ParseResult { imports, tree })
+        Ok(ParseResult { imports, relations, tree })
     }
 
     /// Incrementally re-parses TypeScript source after an edit.
@@ -342,8 +384,16 @@ impl TsParser {
 
         let query = self.get_query()?;
         let imports = extract_imports(&tree, source, query);
+        let relation_query = self.get_relation_query()?;
+        let relations = extract_model_relations(
+            &tree,
+            source,
+            relation_query,
+            default_model_path_matcher(),
+            None,
+        );
 
-        Ok(ParseResult { imports, tree })
+        Ok(ParseResult { imports, relations, tree })
     }
 
     /// Returns the tree-sitter language used by this parser.
@@ -485,6 +535,14 @@ impl ArenaParser {
         }
     }
 
+    /// Returns the appropriate relation query for this parser's language.
+    fn get_relation_query(&self) -> Result<&'static Query, ParseError> {
+        match self.kind {
+            ParserKind::TypeScript => get_typescript_relation_query(),
+            ParserKind::Tsx => get_tsx_relation_query(),
+        }
+    }
+
     /// Parses TypeScript source code using the provided arena for allocation.
     ///
     /// All string data in the returned [`BumpParseResult`] is allocated in the
@@ -531,8 +589,16 @@ impl ArenaParser {
 
         let query = self.get_query()?;
         let imports = extract_imports_arena(arena, &tree, source, query);
+        let relation_query = self.get_relation_query()?;
+        let relations = extract_model_relations(
+            &tree,
+            source,
+            relation_query,
+            default_model_path_matcher(),
+            None,
+        );
 
-        Ok(BumpParseResult { imports, tree })
+        Ok(BumpParseResult { imports, relations, tree })
     }
 
     /// Incrementally re-parses TypeScript source using the provided arena.
@@ -572,8 +638,16 @@ impl ArenaParser {
 
         let query = self.get_query()?;
         let imports = extract_imports_arena(arena, &tree, source, query);
+        let relation_query = self.get_relation_query()?;
+        let relations = extract_model_relations(
+            &tree,
+            source,
+            relation_query,
+            default_model_path_matcher(),
+            None,
+        );
 
-        Ok(BumpParseResult { imports, tree })
+        Ok(BumpParseResult { imports, relations, tree })
     }
 }
 
@@ -703,6 +777,7 @@ import type { TypeOnly } from './type-only';
         let mut parser = TsParser::new().expect("Parser creation failed");
         let result = parser.parse("").expect("Parse failed");
         assert!(result.imports.is_empty());
+        assert!(result.relations.is_empty());
     }
 
     #[test]
@@ -714,6 +789,24 @@ function foo() { return x; }
 "#;
         let result = parser.parse(source).expect("Parse failed");
         assert!(result.imports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_relations() {
+        let mut parser = TsParser::new().expect("Parser creation failed");
+        let source = r#"
+import { OrderModel } from '../shared/models/order-model';
+
+class OrderService {
+    create() {
+        return new OrderModel();
+    }
+}
+"#;
+
+        let result = parser.parse(source).expect("Parse failed");
+        assert_eq!(result.relations.len(), 1);
+        assert_eq!(result.relations[0].relation, ch_core::EdgeKind::Constructs);
     }
 
     #[test]
@@ -851,5 +944,6 @@ import { Bar } from '../shared_2023/models/bar';
         assert_eq!(owned.imports.len(), 2);
         assert_eq!(owned.imports[0].path, "'../shared/models/foo'");
         assert_eq!(owned.imports[1].path, "'../shared_2023/models/bar'");
+        assert!(owned.relations.is_empty());
     }
 }

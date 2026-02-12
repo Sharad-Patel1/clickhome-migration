@@ -4,6 +4,7 @@
 //!
 //! - Extract import statements (static and dynamic)
 //! - Detect model/interface references from shared directories
+//! - Extract normalized model relation evidence with CST anchors
 //! - Support incremental re-parsing on file changes
 //! - Efficiently categorize imports as legacy (`shared/`) or new (`shared_2023/`)
 //!
@@ -168,6 +169,7 @@ pub mod exports;
 mod import;
 mod parser;
 pub mod queries;
+pub mod relations;
 pub mod source;
 
 // Re-export main types for convenient access
@@ -180,6 +182,9 @@ pub use arena::{ArenaStr, BumpImportBuilder, BumpImportInfo, StringInterner};
 
 // Re-export import extraction functions
 pub use import::{extract_imports, extract_imports_arena};
+
+// Re-export relation extraction functions
+pub use relations::extract_model_relations;
 
 // Re-export export extraction functions and types
 pub use exports::{
