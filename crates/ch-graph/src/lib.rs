@@ -7,11 +7,14 @@
 #![warn(missing_docs)]
 
 pub mod builder;
+pub mod comparator;
 pub mod graph;
 pub mod inventory;
+pub mod mapping;
 pub mod types;
 
 pub use builder::DependencyGraphBuilder;
+pub use comparator::GraphComparator;
 pub use graph::{
     DependencyGraph, DependencyStableGraph, GraphCounts, GraphEdge, GraphEdgeKindCount,
     GraphMetadata, GraphNode, GraphNodeKind, ParserMetadata,
@@ -19,6 +22,10 @@ pub use graph::{
 pub use inventory::{
     CanonicalFallbackHit, InventoryAmbiguity, InventorySlotKind, ModelInventory,
     ModelInventoryBuilder, ModelInventoryRecord, build_inventory,
+};
+pub use mapping::{
+    ComparatorConfig, GraphDiff, GraphDiffCounts, LegacyResidual, MappingReason, MappingReasonKind,
+    MappingStatus, MappingWeights, ModelMapping,
 };
 pub use types::{
     AstRelationEvidence, CstAnchor, EdgeKind, ModelArtifact, ModelReference, ModelSource,

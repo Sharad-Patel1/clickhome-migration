@@ -13,3 +13,7 @@ pub use crate::graph::{
     DependencyGraph, DependencyStableGraph, GraphCounts, GraphEdge, GraphEdgeKindCount,
     GraphMetadata, GraphNode, GraphNodeKind, ParserMetadata,
 };
+pub use crate::mapping::{
+    ComparatorConfig, GraphDiff, GraphDiffCounts, LegacyResidual, MappingReason, MappingReasonKind,
+    MappingStatus, MappingWeights, ModelMapping,
+};
