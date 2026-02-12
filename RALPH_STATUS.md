@@ -3,75 +3,60 @@
 ## Loop Metadata
 
 - Status: Running
-- Iteration: 5
-- Last Updated (UTC): 2026-02-12T00:45:55Z
+- Iteration: 6
+- Last Updated (UTC): 2026-02-12T00:58:08Z
 - Ordering Strategy: `topological-sort-by-blockedBy`
-- Current Branch: patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for
-- Current Workflow Step: Step 12/13 complete for QUA-124 (ready for next ticket iteration)
+- Current Branch: patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch
+- Current Workflow Step: Step 12/13 complete for QUA-125 (ready for next ticket iteration)
 - End Signal: `END_ITERATION`
 
 ## Ticket In Progress
 
-- Ticket: QUA-124
-- URL: https://linear.app/quantumqores/issue/QUA-124/build-per-model-inventories-and-canonical-id-mapping-for-legacy-and
-- Branch: `patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
-- Linear plan comment: `f0a42bb1-db45-4984-a80b-6473617fbd9a`
-- Linear completion comment: `32220ea7-4748-4c09-a4fd-f413c6806890`
+- Ticket: QUA-125
+- URL: https://linear.app/quantumqores/issue/QUA-125/populate-model-refs-and-relation-evidence-stream-in-ch-scanner
+- Branch: `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
+- Linear plan comment: `09c11e1a-1d5c-4234-865c-7659cb10cc44`
+- Linear completion comment: `6db10b57-9b79-4951-801a-e985cdf7540c`
 - Linear status: Done
 
 ## Ordered Queue Snapshot
 
-- `orderedIssues`: [`QUA-125`, `QUA-126`, `QUA-127`, `QUA-128`, `QUA-129`, `QUA-130`, `QUA-131`, `QUA-132`, `QUA-133`]
+- `orderedIssues`: [`QUA-126`, `QUA-127`, `QUA-128`, `QUA-129`, `QUA-130`, `QUA-131`, `QUA-132`, `QUA-133`]
 
 ## Accomplished This Iteration
 
-1. Read loop state and selected queue head `QUA-124` from `issues.json`.
+1. Read loop state and selected queue head `QUA-125` from `issues.json`.
 2. Pulled full Linear ticket context (scope, blockers, acceptance criteria, comments).
-3. Verified blocker status: `QUA-122` and `QUA-123` were `Done`; ticket unblocked.
-4. Performed targeted provenance research with Ref MCP + Exa MCP:
-   - tree-sitter query API + syntax semantics
-   - TypeScript declaration corpus node shapes
-   - Rust `HashMap` ordering/determinism constraints
-5. Ran sequential-thinking analysis to lock inventory architecture, determinism, and ambiguity handling.
+3. Verified blocker status: `QUA-123` and `QUA-124` were `Done`; ticket unblocked.
+4. Performed provenance research with Ref MCP + Exa MCP:
+   - tree-sitter query/threading semantics
+   - Rust `Vec::retain` / `HashSet::insert` behavior for deterministic dedup patterns
+5. Ran sequential-thinking analysis for scanner enrichment architecture and deterministic merge strategy.
 6. Posted full implementation plan comment to Linear before coding.
-7. Created and switched to branch `patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`.
-8. Implemented ticket scope:
-   - `crates/ch-scanner/src/registry.rs`:
-     - interfaces parsing now registers per-export model definitions (not single interfaces bucket)
-     - added unit test for per-export registration behavior
-   - `crates/ch-core/src/types/model.rs`:
-     - added `ModelCategory::Service` and `ModelCategory::ServiceCodeGen`
-     - added new shared `ModelArtifact` contract and tests
-   - `crates/ch-graph/src/inventory.rs` (new):
-     - deterministic per-model inventory builder over `ModelRegistry`
-     - canonical-ID mapping via `kebab_to_pascal`/`pascal_to_kebab` + explicit fallback table
-     - interface/codegen/wrapper/service slot linkage with export verification + filename convention checks
-     - ambiguity reporting and fallback-hit reporting
-     - comprehensive unit tests (fallback precedence, chains, missing/ambiguous candidates, deterministic ordering)
-   - `crates/ch-graph/src/lib.rs`, `crates/ch-graph/src/types.rs`, `crates/ch-graph/Cargo.toml`:
-     - inventory API exports and dependency wiring
+7. Created and switched to branch `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`.
+8. Implemented ticket scope in `crates/ch-scanner/src/analyzer.rs`:
+   - propagated parser relations into `FileInfo.relation_evidence`
+   - populated `FileInfo.model_refs` from import symbols and relation endpoints
+   - deduplicated refs by `(name, category, source)` in first-seen order
+   - preserved existing status classification logic
+   - added analyzer tests for enrichment, suffix category inference, overlap dedup, and registry filtering
 9. Ran required validations successfully:
    - `cargo check --workspace`
    - `cargo clippy --workspace`
 10. Committed implementation:
-   - Commit: `fe9b441`
-11. Posted Linear completion evidence comment and transitioned `QUA-124` to `Done`.
-12. Removed `QUA-124` from `issues.json` ordered queue.
-13. Committed loop-state artifacts and pushed branch:
-   - Additional loop-state commit(s) recorded after implementation
-   - `git push -u origin patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
+    - Commit: `ade0ba4`
+11. Posted Linear completion evidence comment and transitioned `QUA-125` to `Done`.
+12. Removed `QUA-125` from `issues.json` ordered queue.
 
 ## Verification Evidence
 
 - `cargo check --workspace` ✅
 - `cargo clippy --workspace` ✅
-- `git commit`: `fe9b441` ✅
-- Loop-state commit(s) for `issues.json`/`RALPH_STATUS.md` recorded ✅
-- `git push -u origin patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for` ✅
+- `git commit`: `ade0ba4` ✅
 - Linear plan comment created ✅
 - Linear completion comment created ✅
 - Linear status transition to `Done` ✅
-- `issues.json` updated with `QUA-124` removed ✅
+- `issues.json` updated with `QUA-125` removed ✅
 
 ## Last Error
 
@@ -80,25 +65,15 @@
 ## Blockers & Notes
 
 - No active blocker on completed ticket.
-- Next queue head is `QUA-125`.
+- Next queue head is `QUA-126`.
 
 ## Files Modified
 
-- `Cargo.lock`
-- `crates/ch-core/src/lib.rs`
-- `crates/ch-core/src/types/mod.rs`
-- `crates/ch-core/src/types/model.rs`
-- `crates/ch-graph/Cargo.toml`
-- `crates/ch-graph/src/lib.rs`
-- `crates/ch-graph/src/types.rs`
-- `crates/ch-graph/src/inventory.rs`
-- `crates/ch-scanner/src/registry.rs`
+- `crates/ch-scanner/src/analyzer.rs`
 - `issues.json`
 - `RALPH_STATUS.md`
 
 ## Git Summary
 
-- Branch: `patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
-- Implementation commit: `fe9b441`
-- Additional loop-state commit(s): present on branch history
-- Pushed: `origin/patelksharad/qua-124-build-per-model-inventories-and-canonical-id-mapping-for`
+- Branch: `patelksharad/qua-125-populate-model_refs-and-relation-evidence-stream-in-ch`
+- Implementation commit: `ade0ba4`

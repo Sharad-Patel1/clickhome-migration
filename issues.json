@@ -7,21 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 3,
-      "id": "cf58801a-847e-4bfb-98b6-2050024b6f6d",
-      "identifier": "QUA-125",
-      "title": "Populate `model_refs` and relation evidence stream in `ch-scanner`",
-      "url": "https://linear.app/quantumqores/issue/QUA-125/populate-model-refs-and-relation-evidence-stream-in-ch-scanner",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-123",
-        "QUA-124"
-      ],
-      "blocks": [
-        "QUA-126"
-      ]
-    },
-    {
       "sequence": 4,
       "id": "9d60d204-14fd-41c6-8192-41757faf324d",
       "identifier": "QUA-126",
