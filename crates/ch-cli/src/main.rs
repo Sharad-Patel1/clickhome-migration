@@ -717,6 +717,7 @@ async fn main() -> color_eyre::Result<()> {
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
+    use serde_json::{Value, json};
 
     #[test]
     fn test_graph_command_defaults() {
@@ -920,6 +921,124 @@ mod tests {
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
+    #[test]
+    fn test_ng15_fixture_contract_summary_matches_golden_snapshot() {
+        let fixture_root = graph_fixture_root();
+        assert!(fixture_root.exists());
+
+        let output_dir = create_temp_output_dir("graph-ng15-contract");
+        let config = fixture_config_for_root(&fixture_root);
+        assert!(config.is_ok());
+        let Some(config) = config.ok() else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+
+        let run_result = run_graph(
+            &config,
+            &output_dir,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        assert!(run_result.is_ok());
+
+        let graph_json = read_json_file(output_dir.join("graph.json").as_path());
+        let plan_json = read_json_file(output_dir.join("migration-plan.json").as_path());
+        let markdown = std::fs::read_to_string(output_dir.join("migration-plan.md").as_std_path()).ok();
+        assert!(graph_json.is_some());
+        assert!(plan_json.is_some());
+        assert!(markdown.is_some());
+
+        let Some(graph_json) = graph_json else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+        let Some(plan_json) = plan_json else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+        let Some(markdown) = markdown else {
+            let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+            return;
+        };
+
+        let summary = contract_summary(&graph_json, &plan_json, &markdown);
+        let expected_path =
+            workspace_root().join("test-fixtures/graph-planner/golden/ng15-mini/contract-summary.json");
+        let expected = read_json_file(expected_path.as_path());
+        assert!(expected.is_some());
+        if let Some(expected) = expected {
+            assert_eq!(summary, expected);
+        }
+
+        let _ = std::fs::remove_dir_all(output_dir.as_std_path());
+    }
+
+    #[test]
+    fn test_ng15_fixture_artifacts_are_reproducible_across_repeated_runs() {
+        let fixture_root = graph_fixture_root();
+        assert!(fixture_root.exists());
+        let config = fixture_config_for_root(&fixture_root);
+        assert!(config.is_ok());
+        let Some(config) = config.ok() else {
+            return;
+        };
+
+        let out_a = create_temp_output_dir("graph-ng15-determinism-a");
+        let out_b = create_temp_output_dir("graph-ng15-determinism-b");
+        let out_c = create_temp_output_dir("graph-ng15-determinism-c");
+
+        let run_a = run_graph(
+            &config,
+            &out_a,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        let run_b = run_graph(
+            &config,
+            &out_b,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        let run_c = run_graph(
+            &config,
+            &out_c,
+            GraphSnapshotMode::Minimal,
+            GraphOutputFormat::All,
+            Some(32),
+        );
+        assert!(run_a.is_ok());
+        assert!(run_b.is_ok());
+        assert!(run_c.is_ok());
+
+        let normalized_a = normalized_artifacts(&out_a);
+        let normalized_b = normalized_artifacts(&out_b);
+        let normalized_c = normalized_artifacts(&out_c);
+        assert!(normalized_a.is_some());
+        assert!(normalized_b.is_some());
+        assert!(normalized_c.is_some());
+
+        if let (Some(normalized_a), Some(normalized_b), Some(normalized_c)) =
+            (normalized_a, normalized_b, normalized_c)
+        {
+            assert_eq!(normalized_a.0, normalized_b.0);
+            assert_eq!(normalized_b.0, normalized_c.0);
+
+            assert_eq!(normalized_a.1, normalized_b.1);
+            assert_eq!(normalized_b.1, normalized_c.1);
+
+            assert_eq!(normalized_a.2, normalized_b.2);
+            assert_eq!(normalized_b.2, normalized_c.2);
+        }
+
+        let _ = std::fs::remove_dir_all(out_a.as_std_path());
+        let _ = std::fs::remove_dir_all(out_b.as_std_path());
+        let _ = std::fs::remove_dir_all(out_c.as_std_path());
+    }
+
     fn fixture_config(root: &Utf8PathBuf) -> color_eyre::Result<Config> {
         let cli = Cli {
             command: Commands::Graph {
@@ -937,6 +1056,202 @@ mod tests {
             editor: None,
         };
         build_config(&cli, true)
+    }
+
+    fn fixture_config_for_root(root: &Utf8PathBuf) -> color_eyre::Result<Config> {
+        let cli = Cli {
+            command: Commands::Graph {
+                output_dir: root.join("out"),
+                snapshot_mode: GraphSnapshotMode::Minimal,
+                format: GraphOutputFormat::All,
+                max_steps: Some(32),
+            },
+            path: Some(root.clone()),
+            shared_path: None,
+            shared_2023_path: None,
+            app_path: None,
+            verbose: false,
+            no_color: true,
+            editor: None,
+        };
+        build_config(&cli, true)
+    }
+
+    fn workspace_root() -> Utf8PathBuf {
+        let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(root) = manifest_dir.parent().and_then(Utf8Path::parent) {
+            return root.to_path_buf();
+        }
+        Utf8PathBuf::from(".")
+    }
+
+    fn graph_fixture_root() -> Utf8PathBuf {
+        workspace_root().join("test-fixtures/graph-planner/ng15-mini")
+    }
+
+    fn create_temp_output_dir(suffix: &str) -> Utf8PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let root_std = std::env::temp_dir().join(format!("ch-migrate-{suffix}-{nanos}"));
+        let root = Utf8PathBuf::from_path_buf(root_std)
+            .unwrap_or_else(|_| Utf8PathBuf::from(format!("/tmp/ch-migrate-{suffix}-{nanos}")));
+        let _ = std::fs::create_dir_all(root.as_std_path());
+        root
+    }
+
+    fn read_json_file(path: &Utf8Path) -> Option<Value> {
+        let raw = std::fs::read_to_string(path.as_std_path()).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    fn normalized_artifacts(output_dir: &Utf8PathBuf) -> Option<(String, String, String)> {
+        let graph = normalized_json_artifact(output_dir.join("graph.json").as_path())?;
+        let plan = normalized_json_artifact(output_dir.join("migration-plan.json").as_path())?;
+        let markdown_raw =
+            std::fs::read_to_string(output_dir.join("migration-plan.md").as_std_path()).ok()?;
+        let markdown = normalize_markdown(&markdown_raw);
+        Some((graph, plan, markdown))
+    }
+
+    fn normalized_json_artifact(path: &Utf8Path) -> Option<String> {
+        let mut value = read_json_file(path)?;
+        strip_generated_timestamps(&mut value);
+        Some(canonical_json_string(&value))
+    }
+
+    fn strip_generated_timestamps(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                map.remove("generated_unix_epoch_ms");
+                for nested in map.values_mut() {
+                    strip_generated_timestamps(nested);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    strip_generated_timestamps(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn canonical_json_string(value: &Value) -> String {
+        match value {
+            Value::Null => "null".to_owned(),
+            Value::Bool(flag) => {
+                if *flag {
+                    "true".to_owned()
+                } else {
+                    "false".to_owned()
+                }
+            }
+            Value::Number(number) => number.to_string(),
+            Value::String(text) => {
+                serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_owned())
+            }
+            Value::Array(items) => {
+                let inner = items
+                    .iter()
+                    .map(canonical_json_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("[{inner}]")
+            }
+            Value::Object(map) => {
+                let mut keys: Vec<_> = map.keys().cloned().collect();
+                keys.sort();
+                let inner = keys
+                    .iter()
+                    .map(|key| {
+                        let key_json =
+                            serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_owned());
+                        let value_json =
+                            map.get(key).map_or_else(|| "null".to_owned(), canonical_json_string);
+                        format!("{key_json}:{value_json}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{{{inner}}}")
+            }
+        }
+    }
+
+    fn normalize_markdown(markdown: &str) -> String {
+        markdown
+            .lines()
+            .filter(|line| !line.starts_with("- Generated unix epoch ms:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn contract_summary(graph_json: &Value, plan_json: &Value, markdown: &str) -> Value {
+        json!({
+            "graph_json": {
+                "top_level_keys": object_keys(graph_json),
+                "metadata_keys": object_keys_for(graph_json, "metadata"),
+                "counts_keys": object_keys_for_nested(graph_json, "metadata", "counts"),
+                "parser_metadata_keys": object_keys_for_nested(graph_json, "metadata", "parser_metadata"),
+                "graph_keys": object_keys_for(graph_json, "graph"),
+                "diff_keys": object_keys_for(graph_json, "diff"),
+                "edge_keys": first_array_object_keys(graph_json, "graph", "edges"),
+            },
+            "migration_plan_json": {
+                "top_level_keys": object_keys(plan_json),
+                "metadata_keys": object_keys_for(plan_json, "metadata"),
+                "counts_keys": object_keys_for(plan_json, "counts"),
+                "step_keys": first_step_keys(plan_json),
+            },
+            "migration_plan_md": {
+                "contains_title": markdown.contains("# Migration Plan"),
+                "contains_snapshot_mode": markdown.contains("- Snapshot mode: `minimal`"),
+                "contains_parser_version": markdown.contains("- Parser version: `"),
+                "contains_relation_query_version": markdown.contains("- Relation query version: `"),
+                "contains_table_header": markdown.contains("| Step | Order | Prerequisites | Risk (bps) |"),
+                "contains_table_divider": markdown.contains("| --- | --- | --- | --- |"),
+            }
+        })
+    }
+
+    fn object_keys(value: &Value) -> Vec<String> {
+        if let Value::Object(map) = value {
+            let mut keys: Vec<_> = map.keys().cloned().collect();
+            keys.sort();
+            return keys;
+        }
+        Vec::new()
+    }
+
+    fn object_keys_for(value: &Value, key: &str) -> Vec<String> {
+        value.get(key).map_or_else(Vec::new, object_keys)
+    }
+
+    fn object_keys_for_nested(value: &Value, first: &str, second: &str) -> Vec<String> {
+        value.get(first).and_then(|nested| nested.get(second)).map_or_else(Vec::new, object_keys)
+    }
+
+    fn first_array_object_keys(value: &Value, parent: &str, child: &str) -> Vec<String> {
+        let Some(array) = value.get(parent).and_then(|nested| nested.get(child)) else {
+            return Vec::new();
+        };
+        let Some(items) = array.as_array() else {
+            return Vec::new();
+        };
+        let Some(first) = items.first() else {
+            return Vec::new();
+        };
+        object_keys(first)
+    }
+
+    fn first_step_keys(value: &Value) -> Vec<String> {
+        let Some(steps) = value.get("steps").and_then(Value::as_array) else {
+            return Vec::new();
+        };
+        let Some(first) = steps.first() else {
+            return Vec::new();
+        };
+        object_keys(first)
     }
 
     fn create_temp_project(suffix: &str) -> Utf8PathBuf {
