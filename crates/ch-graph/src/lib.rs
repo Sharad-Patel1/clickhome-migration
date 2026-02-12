@@ -8,6 +8,7 @@
 
 pub mod builder;
 pub mod comparator;
+pub mod export;
 pub mod graph;
 pub mod inventory;
 pub mod mapping;
@@ -16,6 +17,7 @@ pub mod types;
 
 pub use builder::DependencyGraphBuilder;
 pub use comparator::GraphComparator;
+pub use export::{ExportError, GraphArtifactFormat, GraphArtifactSnapshotMode, export_artifacts};
 pub use graph::{
     DependencyGraph, DependencyStableGraph, GraphCounts, GraphEdge, GraphEdgeKindCount,
     GraphMetadata, GraphNode, GraphNodeKind, ParserMetadata,

@@ -27,13 +27,12 @@ use std::path::{Path, PathBuf};
 use camino::Utf8PathBuf;
 use ch_core::{Config, FileInfo, MigrationStatus};
 use ch_graph::{
-    DependencyGraph, DependencyGraphBuilder, GraphComparator, GraphDiff, GraphPlanner,
-    MigrationPlan, PlannerConfig, build_inventory,
+    DependencyGraphBuilder, GraphArtifactFormat, GraphArtifactSnapshotMode, GraphComparator,
+    GraphPlanner, PlannerConfig, build_inventory, export_artifacts,
 };
 use ch_scanner::{ScanConfig as ScannerConfig, Scanner, StatsSnapshot};
 use ch_ts_parser::ModelPathMatcher;
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::json;
 use tracing::info;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -511,7 +510,14 @@ fn run_graph(
         GraphPlanner::with_config(PlannerConfig { max_steps, ..PlannerConfig::default() });
     let plan = planner.plan(&graph, &diff);
 
-    let written = export_graph_artifacts(output_dir, snapshot_mode, format, &graph, &diff, &plan)?;
+    let written = export_artifacts(
+        output_dir.as_path(),
+        artifact_snapshot_mode(snapshot_mode),
+        artifact_format(format),
+        &graph,
+        &diff,
+        &plan,
+    )?;
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -540,520 +546,20 @@ fn run_graph(
     Ok(())
 }
 
-fn export_graph_artifacts(
-    output_dir: &Utf8PathBuf,
-    snapshot_mode: GraphSnapshotMode,
-    format: GraphOutputFormat,
-    graph: &DependencyGraph,
-    diff: &GraphDiff,
-    plan: &MigrationPlan,
-) -> color_eyre::Result<Vec<Utf8PathBuf>> {
-    let mut written = Vec::new();
-
-    if matches!(format, GraphOutputFormat::Json | GraphOutputFormat::All) {
-        written.extend(write_json_artifacts(output_dir, snapshot_mode, graph, diff, plan)?);
-    }
-    if matches!(format, GraphOutputFormat::Dot | GraphOutputFormat::All) {
-        written.extend(write_dot_artifacts(output_dir, snapshot_mode, graph, plan)?);
-    }
-    if matches!(format, GraphOutputFormat::Md | GraphOutputFormat::All) {
-        written.extend(write_markdown_artifacts(output_dir, snapshot_mode, graph, diff, plan)?);
-    }
-
-    written.sort();
-    Ok(written)
-}
-
-fn write_json_artifacts(
-    output_dir: &Utf8PathBuf,
-    snapshot_mode: GraphSnapshotMode,
-    graph: &DependencyGraph,
-    diff: &GraphDiff,
-    plan: &MigrationPlan,
-) -> color_eyre::Result<Vec<Utf8PathBuf>> {
-    let graph_payload = graph_json_payload(graph, diff, snapshot_mode);
-    let plan_payload = migration_plan_json_payload(plan, snapshot_mode);
-
-    let graph_path = output_dir.join("graph.json");
-    let plan_path = output_dir.join("migration-plan.json");
-
-    let graph_bytes = serde_json::to_vec_pretty(&graph_payload)?;
-    let plan_bytes = serde_json::to_vec_pretty(&plan_payload)?;
-
-    std::fs::write(graph_path.as_std_path(), graph_bytes)?;
-    std::fs::write(plan_path.as_std_path(), plan_bytes)?;
-
-    Ok(vec![graph_path, plan_path])
-}
-
-fn write_dot_artifacts(
-    output_dir: &Utf8PathBuf,
-    snapshot_mode: GraphSnapshotMode,
-    graph: &DependencyGraph,
-    plan: &MigrationPlan,
-) -> color_eyre::Result<Vec<Utf8PathBuf>> {
-    let graph_dot = render_graph_dot(graph, snapshot_mode);
-    let plan_dot = render_plan_dot(plan, snapshot_mode);
-
-    let graph_path = output_dir.join("graph.dot");
-    let plan_path = output_dir.join("migration-plan.dot");
-    std::fs::write(graph_path.as_std_path(), graph_dot)?;
-    std::fs::write(plan_path.as_std_path(), plan_dot)?;
-
-    Ok(vec![graph_path, plan_path])
-}
-
-fn write_markdown_artifacts(
-    output_dir: &Utf8PathBuf,
-    snapshot_mode: GraphSnapshotMode,
-    graph: &DependencyGraph,
-    diff: &GraphDiff,
-    plan: &MigrationPlan,
-) -> color_eyre::Result<Vec<Utf8PathBuf>> {
-    let graph_md = render_graph_markdown(graph, diff, snapshot_mode);
-    let plan_md = render_plan_markdown(plan, snapshot_mode);
-
-    let graph_path = output_dir.join("graph.md");
-    let plan_path = output_dir.join("migration-plan.md");
-    std::fs::write(graph_path.as_std_path(), graph_md)?;
-    std::fs::write(plan_path.as_std_path(), plan_md)?;
-
-    Ok(vec![graph_path, plan_path])
-}
-
-fn graph_json_payload(
-    graph: &DependencyGraph,
-    diff: &GraphDiff,
-    snapshot_mode: GraphSnapshotMode,
-) -> serde_json::Value {
-    let metadata = graph.metadata();
-    let counts = &metadata.counts;
-    let mut edge_kind_counts: Vec<_> = counts
-        .edges_by_kind
-        .iter()
-        .map(|entry| json!({"kind": format!("{:?}", entry.kind), "count": entry.count}))
-        .collect();
-    edge_kind_counts.sort_by(|left, right| {
-        value_string(left, "kind")
-            .cmp(&value_string(right, "kind"))
-            .then_with(|| value_usize(left, "count").cmp(&value_usize(right, "count")))
-    });
-
-    let graph_section = match snapshot_mode {
-        GraphSnapshotMode::Minimal => {
-            let mut node_ids: Vec<_> = graph
-                .graph()
-                .node_indices()
-                .map(|node_index| graph.graph()[node_index].node_id.clone())
-                .collect();
-            node_ids.sort();
-
-            json!({
-                "node_ids": node_ids,
-                "edges": collect_graph_edges(graph, false),
-            })
-        }
-        GraphSnapshotMode::Full => json!({
-            "nodes": collect_graph_nodes(graph, true),
-            "edges": collect_graph_edges(graph, true),
-        }),
-    };
-
-    let diff_section = match snapshot_mode {
-        GraphSnapshotMode::Minimal => json!({
-            "counts": {
-                "matched": diff.counts.matched,
-                "low_confidence": diff.counts.low_confidence,
-                "no_match": diff.counts.no_match,
-                "residuals": diff.counts.residuals,
-            }
-        }),
-        GraphSnapshotMode::Full => json!({
-            "counts": {
-                "matched": diff.counts.matched,
-                "low_confidence": diff.counts.low_confidence,
-                "no_match": diff.counts.no_match,
-                "residuals": diff.counts.residuals,
-            },
-            "mappings": diff.mappings.iter().map(|mapping| {
-                json!({
-                    "legacy_canonical_id": mapping.legacy_canonical_id,
-                    "legacy_symbol": mapping.legacy_symbol,
-                    "modern_canonical_id": mapping.modern_canonical_id,
-                    "modern_symbol": mapping.modern_symbol,
-                    "confidence_bps": mapping.confidence_bps,
-                    "status": format!("{:?}", mapping.status),
-                    "reasons": mapping.reasons.iter().map(|reason| json!({
-                        "kind": format!("{:?}", reason.kind),
-                        "weight_bps": reason.weight_bps,
-                        "details": reason.details,
-                    })).collect::<Vec<_>>(),
-                })
-            }).collect::<Vec<_>>(),
-            "residual_legacy_usages": diff.residual_legacy_usages.iter().map(|residual| {
-                json!({
-                    "file_path": residual.file_path,
-                    "legacy_symbol": residual.legacy_symbol,
-                    "suggested_modern_symbol": residual.suggested_modern_symbol,
-                    "confidence_bps": residual.confidence_bps,
-                    "reasons": residual.reasons.iter().map(|reason| json!({
-                        "kind": format!("{:?}", reason.kind),
-                        "weight_bps": reason.weight_bps,
-                        "details": reason.details,
-                    })).collect::<Vec<_>>(),
-                    "anchors": residual.anchors,
-                })
-            }).collect::<Vec<_>>(),
-        }),
-    };
-
-    json!({
-        "snapshot_mode": snapshot_mode_label(snapshot_mode),
-        "metadata": {
-            "counts": {
-                "total_nodes": counts.total_nodes,
-                "total_edges": counts.total_edges,
-                "interface_nodes": counts.interface_nodes,
-                "model_nodes": counts.model_nodes,
-                "service_nodes": counts.service_nodes,
-                "file_nodes": counts.file_nodes,
-                "symbol_nodes": counts.symbol_nodes,
-                "edges_by_kind": edge_kind_counts,
-            },
-            "source_roots": metadata.source_roots,
-            "parser_metadata": {
-                "parser_version": metadata.parser_metadata.parser_version,
-                "relation_query_version": metadata.parser_metadata.relation_query_version,
-            },
-        },
-        "graph": graph_section,
-        "diff": diff_section,
-    })
-}
-
-fn migration_plan_json_payload(
-    plan: &MigrationPlan,
-    snapshot_mode: GraphSnapshotMode,
-) -> serde_json::Value {
-    let steps = match snapshot_mode {
-        GraphSnapshotMode::Minimal => plan
-            .steps
-            .iter()
-            .map(|step| {
-                json!({
-                    "step_id": step.step_id,
-                    "order": step.order,
-                    "component_id": step.component_id,
-                    "prerequisites": step.prerequisites,
-                    "risk_score_bps": step.risk_score_bps,
-                    "impacted_file_count": step.impacted_files.len(),
-                })
-            })
-            .collect::<Vec<_>>(),
-        GraphSnapshotMode::Full => plan
-            .steps
-            .iter()
-            .map(|step| {
-                json!({
-                    "step_id": step.step_id,
-                    "order": step.order,
-                    "component_id": step.component_id,
-                    "node_ids": step.node_ids,
-                    "prerequisites": step.prerequisites,
-                    "impacted_files": step.impacted_files,
-                    "suggested_replacements": step.suggested_replacements.iter().map(|replacement| json!({
-                        "legacy_symbol": replacement.legacy_symbol,
-                        "modern_symbol": replacement.modern_symbol,
-                        "confidence_bps": replacement.confidence_bps,
-                    })).collect::<Vec<_>>(),
-                    "evidence_refs": step.evidence_refs.iter().map(|evidence| json!({
-                        "relation": format!("{:?}", evidence.relation),
-                        "source": evidence.source,
-                        "target": evidence.target,
-                        "anchors": evidence.anchors,
-                    })).collect::<Vec<_>>(),
-                    "risk_score_bps": step.risk_score_bps,
-                    "risk_breakdown": {
-                        "components": step.risk_breakdown.components.iter().map(|component| json!({
-                            "kind": format!("{:?}", component.kind),
-                            "raw_value": component.raw_value,
-                            "normalized_bps": component.normalized_bps,
-                            "weighted_bps": component.weighted_bps,
-                        })).collect::<Vec<_>>(),
-                    },
-                })
-            })
-            .collect::<Vec<_>>(),
-    };
-
-    json!({
-        "snapshot_mode": snapshot_mode_label(snapshot_mode),
-        "counts": {
-            "total_components": plan.counts.total_components,
-            "emitted_steps": plan.counts.emitted_steps,
-            "truncated_components": plan.counts.truncated_components,
-        },
-        "steps": steps,
-    })
-}
-
-fn collect_graph_nodes(graph: &DependencyGraph, include_details: bool) -> Vec<serde_json::Value> {
-    let mut nodes: Vec<_> = graph
-        .graph()
-        .node_indices()
-        .map(|node_index| {
-            let node = &graph.graph()[node_index];
-            let mut value = json!({
-                "node_id": node.node_id,
-                "kind": format!("{:?}", node.kind),
-            });
-
-            if include_details {
-                if let serde_json::Value::Object(ref mut map) = value {
-                    map.insert(
-                        "source_classification".to_owned(),
-                        json!(format!("{:?}", node.source_classification)),
-                    );
-                    map.insert(
-                        "source".to_owned(),
-                        json!(node.source.map(|source| format!("{source:?}"))),
-                    );
-                    map.insert("canonical_id".to_owned(), json!(node.canonical_id));
-                    map.insert("model_name".to_owned(), json!(node.model_name));
-                    map.insert("symbol_name".to_owned(), json!(node.symbol_name));
-                    map.insert(
-                        "category".to_owned(),
-                        json!(node.category.map(|category| format!("{category:?}"))),
-                    );
-                    map.insert("export_name".to_owned(), json!(node.export_name));
-                    map.insert(
-                        "definition_path".to_owned(),
-                        json!(node.definition_path.as_ref().map(ToString::to_string)),
-                    );
-                    map.insert("file_path".to_owned(), json!(node.file_path));
-                }
-            }
-
-            value
-        })
-        .collect();
-
-    nodes.sort_by_key(|left| value_string(left, "node_id"));
-    nodes
-}
-
-fn collect_graph_edges(graph: &DependencyGraph, include_evidence: bool) -> Vec<serde_json::Value> {
-    let mut edges = Vec::new();
-
-    for edge_index in graph.graph().edge_indices() {
-        let Some((source_index, target_index)) = graph.graph().edge_endpoints(edge_index) else {
-            continue;
-        };
-        let Some(edge) = graph.graph().edge_weight(edge_index) else {
-            continue;
-        };
-
-        let source = graph.graph()[source_index].node_id.clone();
-        let target = graph.graph()[target_index].node_id.clone();
-        let kind = format!("{:?}", edge.kind);
-        let mut value = json!({
-            "source_node_id": source,
-            "target_node_id": target,
-            "kind": kind,
-            "evidence_count": edge.evidence.len(),
-        });
-
-        if include_evidence {
-            if let serde_json::Value::Object(ref mut map) = value {
-                map.insert("evidence".to_owned(), json!(edge.evidence));
-            }
-        }
-
-        edges.push(value);
-    }
-
-    edges.sort_by(|left, right| {
-        value_string(left, "source_node_id")
-            .cmp(&value_string(right, "source_node_id"))
-            .then_with(|| {
-                value_string(left, "target_node_id").cmp(&value_string(right, "target_node_id"))
-            })
-            .then_with(|| value_string(left, "kind").cmp(&value_string(right, "kind")))
-    });
-    edges
-}
-
-fn render_graph_dot(graph: &DependencyGraph, snapshot_mode: GraphSnapshotMode) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = String::from("digraph dependency_graph {\n  rankdir=LR;\n");
-    for node in collect_graph_nodes(graph, snapshot_mode == GraphSnapshotMode::Full) {
-        let node_id = value_string(&node, "node_id");
-        let label = if snapshot_mode == GraphSnapshotMode::Full {
-            let kind = value_string(&node, "kind");
-            format!("{node_id}\\n{kind}")
-        } else {
-            node_id.clone()
-        };
-        let _ =
-            writeln!(output, "  \"{}\" [label=\"{}\"];", dot_escape(&node_id), dot_escape(&label));
-    }
-
-    for edge in collect_graph_edges(graph, false) {
-        let source = value_string(&edge, "source_node_id");
-        let target = value_string(&edge, "target_node_id");
-        let kind = value_string(&edge, "kind");
-        let _ = writeln!(
-            output,
-            "  \"{}\" -> \"{}\" [label=\"{}\"];",
-            dot_escape(&source),
-            dot_escape(&target),
-            dot_escape(&kind)
-        );
-    }
-
-    output.push_str("}\n");
-    output
-}
-
-fn render_plan_dot(plan: &MigrationPlan, snapshot_mode: GraphSnapshotMode) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = String::from("digraph migration_plan {\n  rankdir=LR;\n");
-    for step in &plan.steps {
-        let label = if snapshot_mode == GraphSnapshotMode::Full {
-            format!("{}\\nrisk={}bps", step.step_id, step.risk_score_bps)
-        } else {
-            step.step_id.clone()
-        };
-        let _ = writeln!(
-            output,
-            "  \"{}\" [label=\"{}\"];",
-            dot_escape(&step.step_id),
-            dot_escape(&label)
-        );
-    }
-
-    for step in &plan.steps {
-        for prerequisite in &step.prerequisites {
-            let _ = writeln!(
-                output,
-                "  \"{}\" -> \"{}\";",
-                dot_escape(prerequisite),
-                dot_escape(&step.step_id)
-            );
-        }
-    }
-
-    output.push_str("}\n");
-    output
-}
-
-fn render_graph_markdown(
-    graph: &DependencyGraph,
-    diff: &GraphDiff,
-    snapshot_mode: GraphSnapshotMode,
-) -> String {
-    use std::fmt::Write as _;
-
-    let counts = &graph.metadata().counts;
-    let mut output = String::new();
-    let _ = writeln!(output, "# Dependency Graph");
-    let _ = writeln!(output);
-    let _ = writeln!(output, "- Snapshot mode: `{}`", snapshot_mode_label(snapshot_mode));
-    let _ = writeln!(output, "- Total nodes: `{}`", counts.total_nodes);
-    let _ = writeln!(output, "- Total edges: `{}`", counts.total_edges);
-    let _ = writeln!(output, "- Mappings matched: `{}`", diff.counts.matched);
-    let _ = writeln!(output, "- Mappings low-confidence: `{}`", diff.counts.low_confidence);
-    let _ = writeln!(output, "- Mappings no-match: `{}`", diff.counts.no_match);
-    let _ = writeln!(output, "- Residual legacy usages: `{}`", diff.counts.residuals);
-
-    if snapshot_mode == GraphSnapshotMode::Full {
-        let _ = writeln!(output);
-        let _ = writeln!(output, "## Nodes");
-        let _ = writeln!(output);
-        let _ = writeln!(output, "| Node ID | Kind |");
-        let _ = writeln!(output, "| --- | --- |");
-        for node in collect_graph_nodes(graph, false) {
-            let _ = writeln!(
-                output,
-                "| `{}` | `{}` |",
-                value_string(&node, "node_id"),
-                value_string(&node, "kind")
-            );
-        }
-    }
-
-    output
-}
-
-fn render_plan_markdown(plan: &MigrationPlan, snapshot_mode: GraphSnapshotMode) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = String::new();
-    let _ = writeln!(output, "# Migration Plan");
-    let _ = writeln!(output);
-    let _ = writeln!(output, "- Snapshot mode: `{}`", snapshot_mode_label(snapshot_mode));
-    let _ = writeln!(output, "- Total components: `{}`", plan.counts.total_components);
-    let _ = writeln!(output, "- Emitted steps: `{}`", plan.counts.emitted_steps);
-    let _ = writeln!(output, "- Truncated components: `{}`", plan.counts.truncated_components);
-    let _ = writeln!(output);
-    let _ = writeln!(output, "| Step | Order | Prerequisites | Risk (bps) |");
-    let _ = writeln!(output, "| --- | --- | --- | --- |");
-    for step in &plan.steps {
-        let prerequisites = if step.prerequisites.is_empty() {
-            "-".to_owned()
-        } else {
-            step.prerequisites.join(", ")
-        };
-        let _ = writeln!(
-            output,
-            "| `{}` | `{}` | `{}` | `{}` |",
-            step.step_id, step.order, prerequisites, step.risk_score_bps
-        );
-    }
-
-    if snapshot_mode == GraphSnapshotMode::Full {
-        for step in &plan.steps {
-            let _ = writeln!(output);
-            let _ = writeln!(output, "## {}", step.step_id);
-            let _ = writeln!(output);
-            let _ = writeln!(output, "- Component: `{}`", step.component_id);
-            let _ = writeln!(output, "- Node count: `{}`", step.node_ids.len());
-            let _ = writeln!(output, "- Impacted files: `{}`", step.impacted_files.len());
-            let _ = writeln!(
-                output,
-                "- Suggested replacements: `{}`",
-                step.suggested_replacements.len()
-            );
-            let _ = writeln!(output, "- Evidence refs: `{}`", step.evidence_refs.len());
-        }
-    }
-
-    output
-}
-
-fn dot_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-const fn snapshot_mode_label(mode: GraphSnapshotMode) -> &'static str {
+const fn artifact_snapshot_mode(mode: GraphSnapshotMode) -> GraphArtifactSnapshotMode {
     match mode {
-        GraphSnapshotMode::Minimal => "minimal",
-        GraphSnapshotMode::Full => "full",
+        GraphSnapshotMode::Minimal => GraphArtifactSnapshotMode::Minimal,
+        GraphSnapshotMode::Full => GraphArtifactSnapshotMode::Full,
     }
 }
 
-fn value_string(value: &serde_json::Value, key: &str) -> String {
-    value.get(key).and_then(serde_json::Value::as_str).map(ToOwned::to_owned).unwrap_or_default()
-}
-
-fn value_usize(value: &serde_json::Value, key: &str) -> usize {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|raw| usize::try_from(raw).ok())
-        .unwrap_or_default()
+const fn artifact_format(format: GraphOutputFormat) -> GraphArtifactFormat {
+    match format {
+        GraphOutputFormat::Json => GraphArtifactFormat::Json,
+        GraphOutputFormat::Dot => GraphArtifactFormat::Dot,
+        GraphOutputFormat::Md => GraphArtifactFormat::Md,
+        GraphOutputFormat::All => GraphArtifactFormat::All,
+    }
 }
 
 // =============================================================================
@@ -1303,9 +809,9 @@ mod tests {
             assert!(output_dir.join("graph.json").exists());
             assert!(output_dir.join("migration-plan.json").exists());
             assert!(output_dir.join("graph.dot").exists());
-            assert!(output_dir.join("migration-plan.dot").exists());
-            assert!(output_dir.join("graph.md").exists());
             assert!(output_dir.join("migration-plan.md").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
         }
 
         let _ = std::fs::remove_dir_all(root.as_std_path());
@@ -1334,6 +840,62 @@ mod tests {
             assert!(!output_dir.join("migration-plan.dot").exists());
             assert!(!output_dir.join("graph.md").exists());
             assert!(!output_dir.join("migration-plan.md").exists());
+        }
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_run_graph_respects_dot_only_format_selection() {
+        let root = create_temp_project("graph-dot");
+        let output_dir = root.join("out-dot");
+        let config = fixture_config(&root);
+        assert!(config.is_ok());
+
+        if let Ok(config) = config {
+            let run_result = run_graph(
+                &config,
+                &output_dir,
+                GraphSnapshotMode::Minimal,
+                GraphOutputFormat::Dot,
+                Some(4),
+            );
+            assert!(run_result.is_ok());
+
+            assert!(!output_dir.join("graph.json").exists());
+            assert!(!output_dir.join("migration-plan.json").exists());
+            assert!(output_dir.join("graph.dot").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
+            assert!(!output_dir.join("migration-plan.md").exists());
+        }
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn test_run_graph_respects_markdown_only_format_selection() {
+        let root = create_temp_project("graph-md");
+        let output_dir = root.join("out-md");
+        let config = fixture_config(&root);
+        assert!(config.is_ok());
+
+        if let Ok(config) = config {
+            let run_result = run_graph(
+                &config,
+                &output_dir,
+                GraphSnapshotMode::Full,
+                GraphOutputFormat::Md,
+                Some(4),
+            );
+            assert!(run_result.is_ok());
+
+            assert!(!output_dir.join("graph.json").exists());
+            assert!(!output_dir.join("migration-plan.json").exists());
+            assert!(!output_dir.join("graph.dot").exists());
+            assert!(!output_dir.join("migration-plan.dot").exists());
+            assert!(!output_dir.join("graph.md").exists());
+            assert!(output_dir.join("migration-plan.md").exists());
         }
 
         let _ = std::fs::remove_dir_all(root.as_std_path());
