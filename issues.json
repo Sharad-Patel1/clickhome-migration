@@ -7,21 +7,6 @@
   "orderingStrategy": "topological-sort-by-blockedBy",
   "orderedIssues": [
     {
-      "sequence": 7,
-      "id": "8ae60e22-88ad-408c-967f-6d50a939c9ed",
-      "identifier": "QUA-129",
-      "title": "Add `graph` subcommand to `ch-cli` for graph and migration-plan generation",
-      "url": "https://linear.app/quantumqores/issue/QUA-129/add-graph-subcommand-to-ch-cli-for-graph-and-migration-plan-generation",
-      "status": "Backlog",
-      "blockedBy": [
-        "QUA-126",
-        "QUA-128"
-      ],
-      "blocks": [
-        "QUA-130"
-      ]
-    },
-    {
       "sequence": 8,
       "id": "6cd0c365-7712-456b-ac4c-8eede0ff5a5c",
       "identifier": "QUA-130",
